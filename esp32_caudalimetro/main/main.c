@@ -15,13 +15,16 @@ void app_main(void)
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
     
+    struct tm time_info = {
+        .tm_year = 126,
+        .tm_mon = 7,
+        .tm_mday = 20,
+        .tm_hour = 0,
+        .tm_min = 0,
+        .tm_sec = 0,
+    };
     data.volume = 0;
-    data.time_info.tm_year = 126;
-    data.time_info.tm_mon = 7;
-    data.time_info.tm_mday = 20;
-    data.time_info.tm_hour = 0;
-    data.time_info.tm_min = 0;
-    data.time_info.tm_sec = 0;
+    data.time_info = mktime(&time_info);
     /*
     for(uint32_t i = 0; i < 1000; i++) {
         sd_card_write_measurement(&data);
@@ -58,7 +61,7 @@ void app_main(void)
     sdmmc_card_print_info(stdout, sd_card_config.card);
 
     ESP_LOGI(TAG, "Comienzo lectura");
-    sd_card_read_range(&start_date, &end_date);
+    // sd_card_read_range(&start_date, &end_date);
 
     esp_vfs_fat_sdcard_unmount(sd_card_config.base_path, sd_card_config.card);
     ESP_LOGI(TAG, "SD desmontada");

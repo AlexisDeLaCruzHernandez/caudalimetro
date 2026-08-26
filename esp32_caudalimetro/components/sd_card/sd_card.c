@@ -21,8 +21,12 @@ esp_err_t sd_card_write_measurement(data_t *data)
 {
     char folder_path[32];
     char file_path[64];
-    int year = data->time_info.tm_year + 1900;
-    int month = data->time_info.tm_mon + 1;
+
+    struct tm time_info;
+    localtime_r(&data->time_info, &time_info);
+
+    int year = time_info.tm_year + 1900;
+    int month = time_info.tm_mon + 1;
 
     // El archivo se guarda en una carpeta según el año indicado en el timestamp
     snprintf(folder_path, sizeof(folder_path), MOUNT_POINT "/%04d", year); 
@@ -59,8 +63,8 @@ esp_err_t sd_card_write_measurement(data_t *data)
     char date[16];
     char time[16];
     // Armamos los strings con la fecha y la hora a guardar
-    strftime(date, sizeof(date), "%d/%m/%Y", &data->time_info);
-    strftime(time, sizeof(time), "%H:%M:%S", &data->time_info);
+    strftime(date, sizeof(date), "%d/%m/%Y", &time_info);
+    strftime(time, sizeof(time), "%H:%M:%S", &time_info);
 
     // Escribimos el dato en la SD
     if(fprintf(f, "%s|%s|%ld\n", date, time, data->volume) < 0) {
@@ -79,26 +83,28 @@ esp_err_t sd_card_write_measurement(data_t *data)
     return ESP_OK;
 }
 
-esp_err_t sd_card_read_range(struct tm *start_date, struct tm *end_date) 
+esp_err_t sd_card_read_range(time_t *start_time, time_t *end_time, data_t *buffer, size_t max_size, size_t *items_read)
 {
-    // Convertimos las fechas a time_t para una comparación más sencilla
-    time_t start_time = mktime(start_date);
-    time_t end_time = mktime(end_date);
+    // Convertimos las fechas a struct tm para una obtener años y meses
+    struct tm start_date, end_date;
+    localtime_r(start_time, &start_date);
+    localtime_r(end_time, &end_date);
 
     // Nos fijamos el rango indicado en los parametros
-    if(start_time == -1 || end_time == -1 || start_time > end_time) {
+    if(*start_time == -1 || *end_time == -1 || *start_time > *end_time) {
         ESP_LOGE(TAG, "Rango de fechas inválido");
         return ESP_ERR_INVALID_ARG;
     }
 
     // Guardamos el año y el mes final e inicial para abrir los archivos
-    int current_year = start_date->tm_year + 1900;
-    int current_month = start_date->tm_mon + 1;
-    int end_year = end_date->tm_year + 1900;
-    int end_month = end_date->tm_mon + 1;
+    int current_year = start_date.tm_year + 1900;
+    int current_month = start_date.tm_mon + 1;
+    int end_year = end_date.tm_year + 1900;
+    int end_month = end_date.tm_mon + 1;
 
     bool done = false;
     char line[128];
+    size_t count = 0;
 
     ESP_LOGI(TAG, "Iniciando lectura");
     
@@ -132,13 +138,30 @@ esp_err_t sd_card_read_range(struct tm *start_date, struct tm *end_date)
                     time_t line_time = mktime(&line_date);
 
                     // Si está dentro del rango lo enviamos 
-                    if(line_time >= start_time && line_time <= end_time) {
-                        //ESP_LOGI(TAG, "%s", line);
+                    if(line_time >= *start_time && line_time <= *end_time) {
+                        // Almacenamos el dato en el buffer
+                        buffer[count].time_info = line_time;
+                        buffer[count].volume = volume;
+                        count++;
+
+                        // Actualizamos el tiempo de comienzo
+                        *start_time = line_time;
+
+                        // Verificamos llenado del buffer
+                        if(count == max_size) {
+                            fclose(f);
+                            *items_read = count;
+                            ESP_LOGI(TAG, "Buffer lleno");
+                            return ESP_OK;
+                        }
                     }
                     // En caso de superar el tiempo de finalización quiere decir que completamos la lectura
-                    else if(line_time > end_time) {
+                    else if(line_time > *end_time) {
                         // Cerramos el archivo
                         fclose(f);
+                        // actualizamos tiempo para saber que se terminó la lectura
+                        *start_time = *end_time;
+                        *items_read = count;
                         ESP_LOGI(TAG, "Lectura completada");
                         return ESP_OK;
                     }
@@ -148,6 +171,7 @@ esp_err_t sd_card_read_range(struct tm *start_date, struct tm *end_date)
                 ESP_LOGE(TAG, "Error durante la lectura de %s: %s", file_path, strerror(errno));
                 esp_err_t ret = IS_SD_DISCONNECTED() ? ESP_ERR_INVALID_STATE : ESP_FAIL;
                 fclose(f);
+                *items_read = count;
                 return ret;
             }
             // Cerramos el archivo al terminar de leer
@@ -159,6 +183,7 @@ esp_err_t sd_card_read_range(struct tm *start_date, struct tm *end_date)
             }
             else {
                 ESP_LOGE(TAG, "Error al abrir el archivo (lectura) %s: %s", file_path, strerror(errno));
+                *items_read = count;
                 return IS_SD_DISCONNECTED() ? ESP_ERR_INVALID_STATE : ESP_FAIL;
             }
         }
@@ -177,6 +202,9 @@ esp_err_t sd_card_read_range(struct tm *start_date, struct tm *end_date)
         }
     }
 
+    // actualizamos tiempo para saber que se terminó la lectura
+    *start_time = *end_time;
+    *items_read = count;
     ESP_LOGI(TAG, "Lectura completada, fin de archivos");
     return ESP_OK;
 }

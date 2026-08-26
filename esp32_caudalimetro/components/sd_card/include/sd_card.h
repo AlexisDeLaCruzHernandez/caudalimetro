@@ -15,7 +15,7 @@
 #define IS_SD_DISCONNECTED()    (errno == EIO || errno == ENODEV || errno == EBADF)
 
 typedef struct {
-    struct tm time_info;
+    time_t time_info;
     uint32_t volume;
 } data_t;
 
@@ -45,14 +45,17 @@ esp_err_t sd_card_mount(sd_card_config_t *sd_card_config);
 esp_err_t sd_card_write_measurement(data_t *data);
 
 /**
- * @brief                           Lee mediciones en determinado rango de fechas
- * @param[in] start_date            Fecha inicial del rango a buscar
- * @param[in] end_date              Fecha final del rango a buscar
- * @retval ESP_OK                   Lectura finalizada con éxito
+ * @brief                           Lee mediciones en determinado rango de fechas.
+ * @param[in] start_time            Fecha inicial del rango a buscar.
+ * @param[in] end_time              Fecha final del rango a buscar.
+ * @param[out] buffer               Puntero al buffer de salida donde se almacenarán las mediciones.
+ * @param[in]  max_size             Cantidad máxima de elementos que puede almacenar el buffer.
+ * @param[in]  items_read           Cantidad de elementos almacenados en el buffer.
+ * @retval ESP_OK                   Lectura finalizada con éxito.
  * @retval ESP_ERR_INVALID_STATE    Fallo físico de E/S o tarjeta desconectada (EIO/ENODEV). Requiere re-montar la SD.
  * @retval ESP_FAIL                 Error de lectura o corrupción de datos al procesar el archivo.
  * @retval ESP_ERR_INVALID_ARG      Fechas nulas o rango incoherente (start_date > end_date).
  */
-esp_err_t sd_card_read_range(struct tm *start_date, struct tm *end_date);
+esp_err_t sd_card_read_range(time_t *start_time, time_t *end_time, data_t *buffer, size_t max_size, size_t *items_read);
 
 #endif /* SD_CARD_H */
