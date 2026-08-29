@@ -57,7 +57,7 @@ esp_err_t data_stg_write_measurement(data_t *data)
     // Cerramos el archivo
     fclose(f);
 
-    // ESP_LOGI(TAG, "Archivo (%s) escrito correctamente", file_path);
+    ESP_LOGI(TAG, "Archivo (%s) escrito correctamente", file_path);
     return ESP_OK;
 }
 
