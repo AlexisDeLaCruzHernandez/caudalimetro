@@ -3,6 +3,15 @@
 
 static const char *TAG = "DATA_STG";
 
+static inline void advance_to_next_month(data_stg_reader_t *reader) {
+    reader->current_month++;
+    if (reader->current_month > 12) {
+        reader->current_month = 1;
+        reader->current_year++;
+    }
+    reader->data_read = 0;
+}
+
 esp_err_t data_stg_mount(void) 
 {
     data_stg_config_t data_stg_config = {
@@ -61,112 +70,138 @@ esp_err_t data_stg_write_measurement(data_t *data)
     return ESP_OK;
 }
 
-esp_err_t data_stg_read_range(time_t *start_time, time_t *end_time, data_t *buffer, size_t max_size, size_t *items_read)
+esp_err_t data_stg_reader_init(data_stg_reader_t *reader, time_t start_time, time_t end_time)
 {
-    // Convertimos las fechas a struct tm para una obtener años y meses
-    struct tm start_date, end_date;
-    localtime_r(start_time, &start_date);
-    localtime_r(end_time, &end_date);
+    if (start_time > end_time) return ESP_ERR_INVALID_ARG;
 
-    // Nos fijamos el rango indicado en los parametros
-    if(*start_time == -1 || *end_time == -1 || *start_time > *end_time) {
-        ESP_LOGE(TAG, "Rango de fechas inválido");
-        return ESP_ERR_INVALID_ARG;
-    }
+    struct tm start_date;
+    struct tm end_date;
 
-    // Guardamos el año y el mes final e inicial para abrir los archivos
-    int current_year = start_date.tm_year + 1900;
-    int current_month = start_date.tm_mon + 1;
-    int end_year = end_date.tm_year + 1900;
-    int end_month = end_date.tm_mon + 1;
+    localtime_r(&start_time, &start_date);
+    localtime_r(&end_time, &end_date);
 
-    bool done = false;
-    size_t count = 0;
+    reader->data_read = 0;
 
-    while(!done) {
+    reader->current_year = start_date.tm_year + 1900;
+    reader->current_month = start_date.tm_mon + 1;
+
+    reader->end_year = end_date.tm_year + 1900;
+    reader->end_month = end_date.tm_mon + 1;
+
+    reader->start_time = start_time;
+    reader->end_time = end_time;
+
+    reader->initialized = true;
+    reader->finished = false;
+
+    return ESP_OK;
+}
+
+esp_err_t data_stg_read_range(data_stg_reader_t *reader, data_t *buffer, size_t max_size, size_t *items_read)
+{
+    if(!reader->initialized) return ESP_ERR_INVALID_ARG;
+    *items_read = 0;
+
+    while(!reader->finished) {
         char file_path[64];
         // El nombre del archivo viene dado por el año y el mes del timestamp
-        snprintf(file_path, sizeof(file_path), BASE_PATH "/%04d-%02d.bin", current_year, current_month);
+        snprintf(file_path, sizeof(file_path), BASE_PATH "/%04d-%02d.bin", reader->current_year, reader->current_month);
 
         // Abrimos el archivo en modo lectura
         FILE *f = fopen(file_path, "rb");
-        if(f != NULL) {
-            bool file_done = false;
-
-            while(!file_done) {
-                // Nos fijamos el espacio disponible en el buffer
-                size_t remaining_space = max_size - count;
-                // Nos fijamos cuanto se leyó para detectar fin de archivo
-                size_t elements_read = fread(&buffer[count], sizeof(data_t), remaining_space, f);
-                // Variable para guardar lecturas dentro del rango
-                size_t valid_read = 0;
-                for(size_t i = 0; i < elements_read; i++) {
-                    // Analizamos cada muestra para ver si el dato entra dentro del rango
-                    data_t temp = buffer[count + i];
-                    time_t time_info = (time_t)temp.time_info;
-                    if(time_info >= *start_time && time_info <= *end_time) {
-                        // Movemos los datos a la izquierda para sacar datos fuera de rango
-                        buffer[count + valid_read] = temp;
-                        valid_read++;
-                        *start_time = time_info + 1;
-                    }
-                    else if(time_info >= *end_time) {
-                        // Cerramos el archivo
-                        fclose(f);
-                        // actualizamos tiempo para saber que se terminó la lectura
-                        *start_time = *end_time;
-                        count += valid_read;
-                        *items_read = count;
-                        ESP_LOGI(TAG, "Lectura completada, por end_time");
-                        return ESP_OK;
-                    }
-                }
-                count += valid_read;
-                if(count == max_size) {
-                    fclose(f);
-                    *items_read = count;
-                    ESP_LOGI(TAG, "Buffer lleno");
-                    return ESP_OK;
-                }
-                if(elements_read < remaining_space) {
-                    if (ferror(f)) {
-                        ESP_LOGE(TAG, "Error de I/O al leer: %s", file_path);
-                        fclose(f);
-                        *items_read = count;
-                        return ESP_FAIL;
-                    }
-                    file_done = true;
-                }
-            }
-            fclose(f);
-        }
-        else {
-            if (errno == ENOENT) {
+        if(f == NULL) {
+            // Verificamos error o si no existe el archivo
+            if(errno == ENOENT) {
                 ESP_LOGW(TAG, "Mes no disponible: %s", file_path);
-            } else {
+            } 
+            else {
                 ESP_LOGE(TAG, "Error al abrir: %s", file_path);
-                *items_read = count;
                 return ESP_FAIL;
             }
-        }
 
-        // En caso de que la fecha actual sea la final se terminó la lectura
-        if(current_year == end_year && current_month == end_month) {
-            done = true;
-        }
-        // Caso contrario pasamos al siguiente mes/año
-        else {
-            current_month++;
-            if(current_month > 12) {
-                current_month = 1;
-                current_year++;
+            // Verificamos fin de lectura
+            if (reader->current_year == reader->end_year && reader->current_month == reader->end_month) {
+                reader->finished = true;
+                return ESP_OK;
             }
+
+            // Pasa al siguiente mes
+            advance_to_next_month(reader);
+            continue;
+        }
+        // Armamos el offset con los datos leidos
+        long offset = (long)(reader->data_read * sizeof(data_t));
+        if(fseek(f, offset, SEEK_SET) != 0) {
+            ESP_LOGE(TAG, "Error al posicionarse en %s", file_path);
+            fclose(f);
+            return ESP_FAIL;
+        }
+        // Leemos los datos
+        size_t elements_read =fread(buffer, sizeof(data_t), max_size, f);
+        if(elements_read == 0) {
+            // Verificamos error
+            if(ferror(f)) {
+                ESP_LOGE(TAG, "Error al leer: %s", file_path);
+                fclose(f);
+                return ESP_FAIL;
+            }
+            fclose(f);
+
+            // Verificamos fin de lectura
+            if (reader->current_year == reader->end_year && reader->current_month == reader->end_month) {
+                reader->finished = true;
+                ESP_LOGI(TAG, "Lectura completada, fin de archivos");
+                return ESP_OK;
+            }
+
+            // Pasa al siguiente mes
+            advance_to_next_month(reader);
+            continue;
+        }
+        // Ahora iteramos los elementos leidos para ver su validez
+        size_t valid_read = 0;
+        for(size_t i = 0; i < elements_read; i++) {
+            time_t time_info = (time_t)buffer[i].time_info;
+            // Si el tiempo es menor se descarte
+            if(time_info < reader->start_time) {
+                continue;
+            }
+            // Si se pasó del tiempo quiere decir que terminó
+            if(time_info > reader->end_time) {
+                reader->finished = true;
+                break;
+            }
+            // Si no cumple las otras dos el dato es valido, movemos los datos del buffer
+            buffer[valid_read] = buffer[i];
+            valid_read++;
+        }
+        // Actualizamos la cantidad de elementos leidos del archivo
+        reader->data_read += elements_read;
+
+        // Indicamos cuantos datos leimos
+        *items_read = valid_read;
+
+        fclose(f);
+        // Verificamos fin de archivo
+        if(reader->finished) {
+            ESP_LOGI(TAG, "Lectura completada, fin de rango");
+            return ESP_OK;
+        }
+        // Verificamos buffer lleno
+        if(valid_read == max_size) {
+            ESP_LOGI(TAG, "Buffer lleno");
+            return ESP_OK;
+        }
+        // Si se leyeron menos datos que los solicitados indica fin de archivo
+        if(elements_read < max_size) {
+            if (reader->current_year == reader->end_year && reader->current_month == reader->end_month) {
+                reader->finished = true;
+                ESP_LOGI(TAG, "Lectura completada, fin de archivos");
+                return ESP_OK;
+            }
+
+            advance_to_next_month(reader);
         }
     }
-
-    // actualizamos tiempo para saber que se terminó la lectura
-    *start_time = *end_time;
-    *items_read = count;
-    ESP_LOGI(TAG, "Lectura completada, fin de archivos");
     return ESP_OK;
 }

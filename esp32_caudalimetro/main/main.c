@@ -28,6 +28,7 @@ void borrar_todos_los_archivos(const char *path) {
 void app_main(void)
 {
     data_t data;
+    data_stg_reader_t reader;
     data_t buffer[BUFFER_SIZE];
 
     ESP_LOGI(TAG, "Montando sistema de archivos FAT");
@@ -73,10 +74,12 @@ void app_main(void)
     time_t start_time = mktime(&initial_time);
     time_t end_time = time_sec -= INTERVAL_SEC;
 
+    data_stg_reader_init(&reader, start_time, end_time);
+
     ESP_LOGI(TAG, "Leyendo datos");
     size_t items_read = 0, total_read = 0;
-    while(start_time != end_time) {
-        data_stg_read_range(&start_time, &end_time, buffer, BUFFER_SIZE, &items_read);
+    while(!reader.finished) {
+        data_stg_read_range(&reader, buffer, BUFFER_SIZE, &items_read);
         ESP_LOGI(TAG, "Leidos: %d", items_read);
         if(total_read == 0) {
             time_sec = (time_t)buffer[0].time_info;
