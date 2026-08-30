@@ -4,4 +4,6 @@ idf_component_register(
     REQUIRES
         data_stg
         timestamp
+        nvs_flash 
+        esp_wifi
 )
