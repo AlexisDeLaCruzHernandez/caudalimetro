@@ -16,33 +16,30 @@ SemaphoreHandle_t liter_count;
 void task_datalogger(void *params)
 {
     data_t data = {.time_info = 0, .volume = 0};
-    uint16_t volume;
-    bool sntp = false;
+    time_t time_info;
 
     while(1) {
         vTaskDelay(timestamp_delay(INTERVAL_SEC));
 
-        time(&data.time_info);
+        time(&time_info);
+        data.time_info = (uint32_t)time_info;
         data.volume += uxSemaphoreGetCount(liter_count);
-        if(data.time_info > 1000) sntp = true;
-        else sntp = false;
+        xQueueReset(liter_count);
 
-        // Verificamos sntp 
-        if(data.time_info > 1000) {
+        // Verificamos sntp sincronizado
+        if(sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
             data_stg_write_measurement(&data);
             data.volume = 0;
+            // Indicar en led correcto
         }
         else {
-            // Indicar el led el error
+            // Indicar en led el error
         }
     }
 }
 
 void app_main(void)
 {
-    data_t data;
-    data_t buffer[BUFFER_SIZE];
-
     ESP_LOGI(TAG, "Montando sistema de archivos FAT");
     ESP_ERROR_CHECK(data_stg_mount());
 
@@ -51,12 +48,5 @@ void app_main(void)
 
     liter_count = xSemaphoreCreateCounting(INTERVAL_MAX_LITER * 1.2, 0);
 
-    xTaskCreate(
-        task_datalogger,
-        "task_datalogger",
-        1024,
-        NULL,
-        1,
-        NULL
-    );
+    xTaskCreate(task_datalogger, "task_datalogger", 1024, NULL, 1, NULL);
 }
