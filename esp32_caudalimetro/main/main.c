@@ -44,19 +44,30 @@ void task_datalogger(void *params)
     data_t data = {.time_info = 0, .volume = 0};
     time_t time_info;
     uint16_t volume = 0;
+    int current_month = -1;
+    struct tm time_tm;
 
     while(1) {
         vTaskDelay(timestamp_delay(INTERVAL_SEC));
 
         time(&time_info);
+        localtime_r(&time_info, &time_tm);
+
         data.time_info = (uint32_t)time_info;
         if(xQueueReceive(liter_count, &volume, 0) == pdFALSE) volume = 0;
         data.volume += volume;
 
         // Verificamos sntp sincronizado
         if(sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
-            data_stg_write_measurement(&data);
+            ESP_ERROR_CHECK(data_stg_write_measurement(&data));
             data.volume = 0;
+
+            if(time_tm.tm_mon != current_month) {
+                // Función que verifica si hay que borrar archivos
+                ESP_ERROR_CHECK(data_stg_clean_old_months());
+                current_month = time_tm.tm_mon;
+            }
+
             // Indicar en led correcto
         }
         else {
