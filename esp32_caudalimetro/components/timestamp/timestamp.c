@@ -28,14 +28,12 @@ esp_err_t timestamp_init(void)
 TickType_t timestamp_delay(uint32_t delay)
 {
     time_t current_time;
-    struct tm current_date;
-
+    
     // Obtenemos la hora actual
     time(&current_time);
-    localtime_r(&current_time, &current_date);
 
     // Calculamos los segundos a demorar
-    uint32_t wait_time = delay - current_date.tm_sec;
+    uint32_t wait_time = delay - (current_time % delay);
 
     // Retornamos los ticks a demorar
     return pdMS_TO_TICKS(wait_time * 1000);
