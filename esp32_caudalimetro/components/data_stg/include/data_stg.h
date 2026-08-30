@@ -6,6 +6,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <errno.h>
+#include <dirent.h>
 
 #include "esp_vfs_fat.h"
 
@@ -51,5 +52,12 @@ esp_err_t data_stg_write_measurement(data_t *data);
  * @retval ESP_ERR_INVALID_ARG      Fechas nulas o rango incoherente (start_date > end_date).
  */
 esp_err_t data_stg_read_range(time_t *start_time, time_t *end_time, data_t *buffer, size_t max_size, size_t *items_read);
+
+/**
+ * @brief                           Verifica la cantidad de archivos y borra el más antiguo si hay más de 24.
+ * @retval ESP_OK                   Verificación (y borrado si aplicaba) exitosa.
+ * @retval ESP_FAIL                 Error al abrir el directorio o eliminar el archivo.
+ */
+esp_err_t data_stg_clean_old_months(void);
 
 #endif /* DATA_STG_H */

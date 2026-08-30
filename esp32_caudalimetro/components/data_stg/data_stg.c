@@ -170,3 +170,48 @@ esp_err_t data_stg_read_range(time_t *start_time, time_t *end_time, data_t *buff
     ESP_LOGI(TAG, "Lectura completada, fin de archivos");
     return ESP_OK;
 }
+
+esp_err_t data_stg_clean_old_months(void) 
+{
+    DIR *dir = opendir(BASE_PATH);
+    if (dir == NULL) {
+        ESP_LOGE(TAG, "Error al abrir el directorio base");
+        return ESP_FAIL;
+    }
+
+    struct dirent *entry;
+    int file_count = 0;
+    char oldest_file[64] = "";
+
+    // Leemos todos los archivos del directorio
+    while ((entry = readdir(dir)) != NULL) {
+        // Ignoramos los directorios actuales y padres
+        if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+
+        // Filtramos para contar solo los archivos .bin
+        if (strstr(entry->d_name, ".bin") != NULL) {
+            file_count++;
+            
+            // Si oldest_file está vacío o el archivo actual es alfabéticamente menor (más antiguo)
+            if (strlen(oldest_file) == 0 || strcmp(entry->d_name, oldest_file) < 0) {
+                strncpy(oldest_file, entry->d_name, sizeof(oldest_file));
+            }
+        }
+    }
+    closedir(dir);
+
+    // Si tenemos más de 24 meses (archivos), borramos el más antiguo
+    if (file_count > 24) {
+        char filepath[128];
+        snprintf(filepath, sizeof(filepath), "%s/%s", BASE_PATH, oldest_file);
+        
+        if (remove(filepath) == 0) {
+            ESP_LOGI(TAG, "Límite de 24 meses superado. Archivo antiguo eliminado: %s", oldest_file);
+        } else {
+            ESP_LOGE(TAG, "Error al eliminar el archivo: %s", filepath);
+            return ESP_FAIL;
+        }
+    }
+    
+    return ESP_OK;
+}
