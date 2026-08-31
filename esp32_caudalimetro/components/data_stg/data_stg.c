@@ -54,6 +54,9 @@ esp_err_t data_stg_write_measurement(data_t *data)
         return ESP_FAIL;
     }
 
+    // Forzamos escritura inmediata
+    fsync(fileno(f));
+    
     // Cerramos el archivo
     fclose(f);
 
