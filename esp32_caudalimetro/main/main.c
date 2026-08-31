@@ -57,22 +57,114 @@ void task_datalogger(void *params)
         if(xQueueReceive(liter_count, &volume, 0) == pdFALSE) volume = 0;
         data.volume += volume;
 
-        // Verificamos sntp sincronizado
-        if(sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
-            ESP_ERROR_CHECK(data_stg_write_measurement(&data));
-            data.volume = 0;
+        if(time_tm.tm_year > 120) {
+            if(data_stg_write_measurement(&data) == ESP_OK) {
+                data.volume = 0;
+            }
+            else ESP_LOGE(TAG, "Error guardando muestra");
 
             if(time_tm.tm_mon != current_month) {
                 // Función que verifica si hay que borrar archivos
-                ESP_ERROR_CHECK(data_stg_clean_old_months());
-                current_month = time_tm.tm_mon;
+                if(data_stg_clean_old_months() == ESP_OK) current_month = time_tm.tm_mon;
             }
+        }
 
+        // Verificamos sntp sincronizado
+        if(sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
             // Indicar en led correcto
         }
         else {
             // Indicar en led el error
         }
+    }
+}
+
+void task_tcp_server(void *params)
+{
+    struct sockaddr_in dest_addr;
+
+    dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(TCP_PORT);
+
+    int listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
+    if(listen_sock < 0) {
+        ESP_LOGE(TAG, "Error creando el socket");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    int opt = 1;
+    setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    if(bind(listen_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) < 0) {
+        ESP_LOGE(TAG, "Error al hacer bind");
+        close(listen_sock);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    if(listen(listen_sock, 1) < 0) {
+        ESP_LOGE(TAG, "Error al hacer listen");
+        close(listen_sock);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Servidor TCP escuchando en el puerto %d", TCP_PORT);
+
+    while (1) {
+        struct sockaddr_storage source_addr;
+        socklen_t addr_len = sizeof(source_addr);
+        
+        // El servidor se bloquea aquí esperando una conexión de la PC
+        int sock = accept(listen_sock, (struct sockaddr *)&source_addr, &addr_len);
+        if (sock < 0) {
+            ESP_LOGE(TAG, "Error al aceptar conexión");
+            continue;
+        }
+
+        // Añadimos timeout de 5 segundos para la recepción
+        struct timeval timeout;
+        timeout.tv_sec = 5;
+        timeout.tv_usec = 0;
+        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+
+        // Recibir la estructura de solicitud (start_time y end_time)
+        tcp_request_t request;
+        if(!recv_all(sock, &request, sizeof(request))) {
+            ESP_LOGE(TAG, "No se pudo recibir tcp_request_t");
+            shutdown(sock, SHUT_RDWR);
+            close(sock);
+            continue;
+        }
+
+        ESP_LOGI(TAG, "Solicitud: start=%lu end=%lu", request.start_time, request.end_time);
+
+        time_t start_time = (time_t)ntohl(request.start_time);
+        time_t end_time = (time_t)ntohl(request.end_time);
+        data_t buffer[BUFFER_SIZE];
+        size_t items_read;
+        while(start_time != end_time) {
+            esp_err_t err = data_stg_read_range(&start_time, &end_time, buffer, BUFFER_SIZE, &items_read);
+            if(err != ESP_OK) {
+                ESP_LOGE(TAG, "Error leyendo datos");
+                break;
+            }
+            if(items_read > 0) {
+                for(size_t i = 0; i < items_read; i++) {
+                    buffer[i].time_info = htonl(buffer[i].time_info);
+                    buffer[i].volume = htonl(buffer[i].volume);
+                }
+                if(!send_all(sock, buffer, items_read * sizeof(data_t))) {
+                    ESP_LOGE(TAG, "Error enviando datos");
+                    break;
+                }
+            }
+        }
+        // Cerramos el socket de esta sesión y volvemos a escuchar
+        shutdown(sock, SHUT_WR);
+        close(sock);
     }
 }
 
@@ -88,7 +180,9 @@ void app_main(void)
     ESP_ERROR_CHECK(gpio_caudal_init(gpio_isr_handler));
 
     liter_count = xQueueCreate(1, sizeof(uint16_t));
+    caudal_switch = xSemaphoreCreateBinary();
 
     xTaskCreate(task_caudal, "task_caudal", 1024, NULL, 1, NULL);
-    xTaskCreate(task_datalogger, "task_datalogger", 1024, NULL, 1, NULL);
+    xTaskCreate(task_datalogger, "task_datalogger", 1024 * 4, NULL, 1, NULL);
+    xTaskCreate(task_tcp_server, "task_tcp_server", 1024 * 4, NULL, 1, NULL);
 }
