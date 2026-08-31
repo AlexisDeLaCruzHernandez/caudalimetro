@@ -130,6 +130,24 @@ void task_tcp_server(void *params)
         timeout.tv_usec = 0;
         setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
 
+        // Obtener la primera y última fecha guardadas en la memoria Flash
+        time_t first_time = 0;
+        time_t last_time = 0;
+        data_stg_get_time_range(&first_time, &last_time);
+
+        tcp_range_response_t range_info = {
+            .first_time = htonl((uint32_t)first_time),
+            .last_time  = htonl((uint32_t)last_time)
+        };
+
+        // Enviar la información del rango disponible al cliente al conectar
+        if(!send_all(sock, &range_info, sizeof(range_info))) {
+            ESP_LOGE(TAG, "Error al enviar el rango de fechas al cliente");
+            shutdown(sock, SHUT_RDWR);
+            close(sock);
+            continue;
+        }
+
         // Recibir la estructura de solicitud (start_time y end_time)
         tcp_request_t request;
         if(!recv_all(sock, &request, sizeof(request))) {

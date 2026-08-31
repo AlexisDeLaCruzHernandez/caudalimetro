@@ -18,6 +18,11 @@
 #define TCP_PORT            3333
 
 typedef struct {
+    uint32_t first_time; // Timestamp de la primera muestra en flash
+    uint32_t last_time;  // Timestamp de la última muestra en flash
+} __attribute__((packed)) tcp_range_response_t;
+
+typedef struct {
     uint32_t start_time;
     uint32_t end_time;
 } __attribute__((packed)) tcp_request_t;
