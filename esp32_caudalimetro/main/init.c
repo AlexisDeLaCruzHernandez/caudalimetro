@@ -54,3 +54,49 @@ esp_err_t gpio_caudal_init(gpio_isr_t isr_handler)
 
     return ESP_OK;
 }
+
+bool recv_all(int sock, void *buffer, size_t length) 
+{ 
+    uint8_t *ptr = (uint8_t *)buffer; 
+    size_t received = 0; 
+    while(received < length) { 
+        int ret = recv(sock, ptr + received, length - received, 0); 
+        if(ret == 0) { 
+            // El cliente cerró la conexión antes de completar el mensaje 
+            ESP_LOGW(TAG, "Cliente cerró la conexión durante recv()"); 
+            return false; 
+        } 
+        if(ret < 0) { 
+            if(errno == EINTR) { 
+                // La llamada fue interrumpida; simplemente reintentar 
+                continue; 
+            } 
+            ESP_LOGE(TAG, "recv() fallo: errno=%d (%s)", errno, strerror(errno)); 
+            return false; 
+        } 
+        received += (size_t)ret; 
+    } 
+    return true; 
+}
+
+bool send_all(int sock, const void *buffer, size_t length) 
+{ 
+    const uint8_t *ptr = (const uint8_t *)buffer; 
+    size_t sent = 0; 
+    while(sent < length) { 
+        int ret = send(sock, ptr + sent, length - sent, 0); 
+        if(ret < 0) { 
+            if(errno == EINTR) { 
+                continue; 
+            } 
+            ESP_LOGE(TAG, "send() fallo: errno=%d (%s)", errno, strerror(errno)); 
+            return false; 
+        } 
+        if(ret == 0) { 
+            ESP_LOGE(TAG, "send() devolvio 0"); 
+            return false; 
+        } 
+        sent += (size_t)ret; 
+    } 
+    return true; 
+}
