@@ -60,4 +60,14 @@ esp_err_t data_stg_read_range(time_t *start_time, time_t *end_time, data_t *buff
  */
 esp_err_t data_stg_clean_old_months(void);
 
+/**
+ * @brief                           Obtiene los timestamps del primer y último registro almacenados.
+ * @param[out] first_time           Puntero a la variable donde se guardará el primer timestamp.
+ * @param[out] last_time            Puntero a la variable donde se guardará el último timestamp.
+ * @retval ESP_OK                   Búsqueda exitosa.
+ * @retval ESP_ERR_NOT_FOUND        No se encontraron archivos en la memoria.
+ * @retval ESP_FAIL                 Error al leer los archivos.
+ */
+esp_err_t data_stg_get_time_range(time_t *first_time, time_t *last_time);
+
 #endif /* DATA_STG_H */

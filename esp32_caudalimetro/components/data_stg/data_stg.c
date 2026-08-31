@@ -218,3 +218,81 @@ esp_err_t data_stg_clean_old_months(void)
     
     return ESP_OK;
 }
+
+esp_err_t data_stg_get_time_range(time_t *first_time, time_t *last_time)
+{
+    DIR *dir = opendir(BASE_PATH);
+    if(dir == NULL) {
+        ESP_LOGE(TAG, "Error al abrir el directorio base");
+        return ESP_FAIL;
+    }
+
+    struct dirent *entry;
+    char oldest_file[64] = "";
+    char newest_file[64] = "";
+
+    // Escaneamos los archivos .bin para encontrar el más viejo y el más nuevo por nombre
+    while((entry = readdir(dir)) != NULL) {
+        if(strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0) continue;
+
+        if(strstr(entry->d_name, ".bin") != NULL) {
+            if(strlen(oldest_file) == 0 || strcmp(entry->d_name, oldest_file) < 0) {
+                strncpy(oldest_file, entry->d_name, sizeof(oldest_file) - 1);
+            }
+            if(strlen(newest_file) == 0 || strcmp(entry->d_name, newest_file) > 0) {
+                strncpy(newest_file, entry->d_name, sizeof(newest_file) - 1);
+            }
+        }
+    }
+    closedir(dir);
+
+    // Si no se encontró ningún archivo .bin
+    if(strlen(oldest_file) == 0) {
+        *first_time = 0;
+        *last_time = 0;
+        return ESP_ERR_NOT_FOUND;
+    }
+
+    // Obtener el primer registro del archivo más antiguo
+    char path[128];
+    snprintf(path, sizeof(path), "%s/%s", BASE_PATH, oldest_file);
+    FILE *f_old = fopen(path, "rb");
+    if(f_old == NULL) return ESP_FAIL;
+
+    data_t first_sample;
+    if(fread(&first_sample, sizeof(data_t), 1, f_old) == 1) {
+        *first_time = (time_t)first_sample.time_info;
+    } 
+    else {
+        fclose(f_old);
+        return ESP_FAIL;
+    }
+    fclose(f_old);
+
+    // Obtener el último registro del archivo más nuevo
+    snprintf(path, sizeof(path), "%s/%s", BASE_PATH, newest_file);
+    FILE *f_new = fopen(path, "rb");
+    if(f_new == NULL) return ESP_FAIL;
+
+    // Nos posicionamos al final del archivo menos el tamaño de una muestra
+    fseek(f_new, 0, SEEK_END);
+    long file_size = ftell(f_new);
+    if(file_size >= (long)sizeof(data_t)) {
+        fseek(f_new, -((long)sizeof(data_t)), SEEK_END);
+        data_t last_sample;
+        if(fread(&last_sample, sizeof(data_t), 1, f_new) == 1) {
+            *last_time = (time_t)last_sample.time_info;
+        } 
+        else {
+            fclose(f_new);
+            return ESP_FAIL;
+        }
+    } 
+    else {
+        fclose(f_new);
+        return ESP_FAIL;
+    }
+    fclose(f_new);
+
+    return ESP_OK;
+}
