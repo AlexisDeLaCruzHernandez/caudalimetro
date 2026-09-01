@@ -296,3 +296,108 @@ esp_err_t data_stg_get_time_range(time_t *first_time, time_t *last_time)
 
     return ESP_OK;
 }
+
+int days_in_month(int year, int month) 
+{
+    int days[] = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31};
+    
+    // Verificación de año bisiesto para febrero
+    if (month == 2 && ((year % 4 == 0 && year % 100 != 0) || (year % 400 == 0))) {
+        return 29;
+    }
+    return days[month - 1];
+}
+
+void data_stg_set_mem(time_t start_time) 
+{
+    struct tm time_info;
+    localtime_r(&start_time, &time_info);
+    int current_year = time_info.tm_year + 1900;
+    int current_month = time_info.tm_mon + 1;
+
+    for(uint8_t i = 0; i < 24; i++) {
+        char file_name[64];
+        snprintf(file_name, sizeof(file_name), BASE_PATH "/%04d-%02d.bin", current_year, current_month);
+
+        FILE *f = fopen(file_name, "ab");
+        if(!f) {
+            perror("Error al crear el archivo");
+            return;   
+        }
+
+        int days = days_in_month(current_year, current_month);
+        int total_records = days * 24 * 4;
+        uint32_t first_time = start_time;
+
+        // Generar y escribir los datos del mes
+        for (int i = 0; i < total_records; i++) {
+            data_t record;
+            record.time_info = start_time;
+            record.volume = 10 + (uint16_t)(rand() % 21); // Volumen simulado entre 0 y 999
+
+            fwrite(&record, sizeof(data_t), 1, f);
+            
+            // Avanzar el tiempo en 900 segundos (15 minutos)
+            start_time += 900; 
+        }
+        
+        fclose(f);
+        
+        uint32_t last_time = start_time - 900;
+        
+        char first_time_str[32];
+        char last_time_str[32];
+        
+        time_t t_first = (time_t)first_time;
+        struct tm tm_first;
+        localtime_r(&t_first, &tm_first);
+
+        strftime(first_time_str, sizeof(first_time_str), "%Y-%m-%d %H:%M:%S", &tm_first);
+        
+        time_t t_last = (time_t)last_time;
+        struct tm tm_last;
+        localtime_r(&t_last, &tm_last);
+
+        strftime(last_time_str, sizeof(last_time_str), "%Y-%m-%d %H:%M:%S", &tm_last);
+        
+        printf("Generado: %s | Registros: %d | Tamaño: %lu bytes\n", 
+        file_name, total_records, (unsigned long)(total_records * sizeof(data_t)));
+        printf("  -> Inicio: %s | Fin: %s\n\n", first_time_str, last_time_str);
+        
+        // Lógica para avanzar de mes y año
+        current_month++;
+        if (current_month > 12) {
+            current_month = 1;
+            current_year++;
+        }
+    }
+}
+
+void data_stg_info(const char *path)
+{
+    uint64_t total_bytes = 0;
+    uint64_t free_bytes = 0;
+
+    // Llamada nativa de ESP-IDF para obtener info de FATFS
+    esp_err_t err = esp_vfs_fat_info(path, &total_bytes, &free_bytes);
+    
+    if (err != ESP_OK) {
+        ESP_LOGE("MEMORIA", "Error al obtener info de la partición: %s", esp_err_to_name(err));
+        return;
+    }
+
+    uint64_t used_bytes = total_bytes - free_bytes;
+
+    // Conversión a Megabytes para que sea más fácil de leer
+    float total_mb = (float)total_bytes / (1024.0 * 1024.0);
+    float free_mb  = (float)free_bytes / (1024.0 * 1024.0);
+    float used_mb  = (float)used_bytes / (1024.0 * 1024.0);
+    float porcentaje = ((float)used_bytes / (float)total_bytes) * 100.0;
+
+    ESP_LOGI("MEMORIA", "=== Estado de la partición FAT ===");
+    ESP_LOGI("MEMORIA", "Espacio Total:   %llu bytes (%.2f MB)", total_bytes, total_mb);
+    ESP_LOGI("MEMORIA", "Espacio Ocupado: %llu bytes (%.2f MB)", used_bytes, used_mb);
+    ESP_LOGI("MEMORIA", "Espacio Libre:   %llu bytes (%.2f MB)", free_bytes, free_mb);
+    ESP_LOGI("MEMORIA", "Uso de memoria:  %.1f%%", porcentaje);
+    ESP_LOGI("MEMORIA", "==================================");
+}

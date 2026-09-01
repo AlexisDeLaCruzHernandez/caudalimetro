@@ -70,4 +70,16 @@ esp_err_t data_stg_clean_old_months(void);
  */
 esp_err_t data_stg_get_time_range(time_t *first_time, time_t *last_time);
 
+/**
+ * @brief                           Llena la memoria con 24 meses desde la fecha inicial con caudales aleatorios
+ * @param[in] start_time            Tiempo inicial para los datos
+ */
+void data_stg_set_mem(time_t start_time);
+
+/**
+ * @brief                           Muestra los archivos y el espacio en memoria
+ * @param[in] path                  String con el directorio base del sistema
+ */
+void data_stg_info(const char *path);
+
 #endif /* DATA_STG_H */
