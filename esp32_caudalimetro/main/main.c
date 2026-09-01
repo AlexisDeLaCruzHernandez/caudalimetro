@@ -5,6 +5,7 @@
 #include "freertos/queue.h"
 
 #include "esp_log.h"
+#include "nvs_flash.h"
 
 #include "data_stg.h"
 #include "timestamp.h"
@@ -14,6 +15,36 @@ static const char *TAG = "MAIN";
 
 SemaphoreHandle_t caudal_switch;
 QueueHandle_t liter_count;
+QueueHandle_t led_error;
+EventGroupHandle_t wifi_event_group;
+const int WIFI_CONNECTED_BIT = BIT0;
+
+static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) 
+{
+    led_state_t led_wifi = {.led_pin = WIFI_ERROR_PIN, .error = true};
+    // Se ejecuta al inicializar el modo STA y quiere conectarse 
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        esp_wifi_connect();
+    } 
+    
+    // Se ejecuta si se perdió la conexión, se intenta conectar nuevamente e indica la desconexión
+    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        ESP_LOGI(TAG, "Desconectado del Wi-Fi. Reconectando...");
+        xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
+        led_wifi.error = true;
+        xQueueSendToBack(led_error, &led_wifi, portMAX_DELAY);
+        esp_wifi_connect();
+    } 
+    
+    // Se ejecutá cuando se obtuvo una dirección IP, muestra la ip e indica la conexión
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        ESP_LOGI(TAG, "IP obtenida: " IPSTR, IP2STR(&event->ip_info.ip));
+        xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
+        led_wifi.error = false;
+        xQueueSendToBack(led_error, &led_wifi, portMAX_DELAY);
+    }
+}
 
 static void IRAM_ATTR gpio_isr_handler(void *arg)
 {
@@ -23,9 +54,44 @@ static void IRAM_ATTR gpio_isr_handler(void *arg)
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
+
+void task_led_error(void *params)
+{
+    led_state_t leds[3] = {
+        {.led_pin = SNTP_ERROR_PIN, .error = true},
+        {.led_pin = WIFI_ERROR_PIN, .error = true},
+        {.led_pin = FLASH_ERROR_PIN, .error = true},
+    };
+    led_state_t led_info;
+    bool toggle = false;
+    
+    while(1) {
+        toggle = !toggle;
+        
+        if(xQueueReceive(led_error, &led_info, 0) == pdTRUE) {
+            if(led_info.led_pin == SNTP_ERROR_PIN) leds[0].error = led_info.error;
+            else if(led_info.led_pin == WIFI_ERROR_PIN) leds[1].error = led_info.error;
+            else leds[2].error = led_info.error;
+        }
+        
+        for(uint8_t i = 0; i < 3; i++) {
+            if(leds[i].error) {
+                gpio_set_level(leds[i].led_pin, toggle);
+            }
+            else {
+                gpio_set_level(leds[i].led_pin, 0);
+            }
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(SLEEP_TIME_MS));
+    }
+}
+
+
 void task_caudal(void *params)
 {
     uint16_t volume = 0;
+    
     while(1) {
         xSemaphoreTake(caudal_switch, portMAX_DELAY);
         vTaskDelay(pdMS_TO_TICKS(DEBOUNCE_TIME_MS));
@@ -46,6 +112,9 @@ void task_datalogger(void *params)
     uint16_t volume = 0;
     int current_month = -1;
     struct tm time_tm;
+    led_state_t led_flash, led_sntp;
+    led_flash.led_pin = FLASH_ERROR_PIN;
+    led_sntp.led_pin = SNTP_ERROR_PIN;
 
     while(1) {
         vTaskDelay(timestamp_delay(INTERVAL_SEC));
@@ -57,25 +126,32 @@ void task_datalogger(void *params)
         if(xQueueReceive(liter_count, &volume, 0) == pdFALSE) volume = 0;
         data.volume += volume;
 
-        if(time_tm.tm_year > 120) {
+        // Verificamos sntp sincronizado
+        if (sntp_is_sync_valid(MAX_SNTP_SYNC_SEC)) {
+            led_sntp.error = false;
             if(data_stg_write_measurement(&data) == ESP_OK) {
+                ESP_LOGI(TAG, "A guardar: [%04d/%02d/%02d] %02d:%02d:%02d  %d",
+                    time_tm.tm_year + 1900, time_tm.tm_mon + 1, time_tm.tm_mday, time_tm.tm_hour, 
+                    time_tm.tm_min, time_tm.tm_sec, data.volume
+                );
                 data.volume = 0;
+                led_flash.error = false;
             }
-            else ESP_LOGE(TAG, "Error guardando muestra");
+            else {
+                ESP_LOGE(TAG, "Error guardando muestra");
+                led_flash.error = true;
+            }
+            xQueueSendToBack(led_error, &led_flash, portMAX_DELAY);
 
             if(time_tm.tm_mon != current_month) {
                 // Función que verifica si hay que borrar archivos
                 if(data_stg_clean_old_months() == ESP_OK) current_month = time_tm.tm_mon;
             }
         }
-
-        // Verificamos sntp sincronizado
-        if(sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
-            // Indicar en led correcto
-        }
         else {
-            // Indicar en led el error
+            led_sntp.error = true;
         }
+        xQueueSendToBack(led_error, &led_sntp, portMAX_DELAY);
     }
 }
 
@@ -157,10 +233,22 @@ void task_tcp_server(void *params)
             continue;
         }
 
-        ESP_LOGI(TAG, "Solicitud: start=%lu end=%lu", request.start_time, request.end_time);
-
         time_t start_time = (time_t)ntohl(request.start_time);
         time_t end_time = (time_t)ntohl(request.end_time);
+        
+        char first_time_str[32];
+        char last_time_str[32];
+
+        struct tm tm_start;
+        localtime_r(&start_time, &tm_start);
+        strftime(first_time_str, sizeof(first_time_str), "%Y-%m-%d %H:%M:%S", &tm_start);
+
+        struct tm tm_end;
+        localtime_r(&end_time, &tm_end);
+        strftime(last_time_str, sizeof(last_time_str), "%Y-%m-%d %H:%M:%S", &tm_end);
+
+        printf("Request -> Inicio: %s | Fin: %s\n\n", first_time_str, last_time_str);
+
         data_t buffer[BUFFER_SIZE];
         size_t items_read;
         while(start_time != end_time) {
@@ -172,7 +260,7 @@ void task_tcp_server(void *params)
             if(items_read > 0) {
                 for(size_t i = 0; i < items_read; i++) {
                     buffer[i].time_info = htonl(buffer[i].time_info);
-                    buffer[i].volume = htonl(buffer[i].volume);
+                    buffer[i].volume = htons(buffer[i].volume);
                 }
                 if(!send_all(sock, buffer, items_read * sizeof(data_t))) {
                     ESP_LOGE(TAG, "Error enviando datos");
@@ -188,18 +276,36 @@ void task_tcp_server(void *params)
 
 void app_main(void)
 {
+    led_state_t led;
+    liter_count = xQueueCreate(1, sizeof(uint16_t));
+    caudal_switch = xSemaphoreCreateBinary();
+    led_error = xQueueCreate(6, sizeof(led_state_t));
+
+    ESP_LOGI(TAG, "Inicializando leds de error");
+    ESP_ERROR_CHECK(gpio_error_init());
+    xTaskCreate(task_led_error, "task_led_error", 1024, NULL, 1, NULL);
+
+    ESP_LOGI(TAG, "Inicializando nvs flash");
+    ESP_ERROR_CHECK(nvs_flash_init());
+
     ESP_LOGI(TAG, "Montando sistema de archivos FAT");
     ESP_ERROR_CHECK(data_stg_mount());
+    led.led_pin = FLASH_ERROR_PIN;
+    led.error = false;
+    xQueueSendToBack(led_error, &led, portMAX_DELAY);
+    
 
+    ESP_LOGI(TAG, "Inicializando Wi-Fi");
+    wifi_init_sta(&wifi_event_group, wifi_event_handler);
+    
     ESP_LOGI(TAG, "Inicializando sntp");
     ESP_ERROR_CHECK(timestamp_init());
-
+    
     ESP_LOGI(TAG, "Inicializando gpio caudalimetro");
     ESP_ERROR_CHECK(gpio_caudal_init(gpio_isr_handler));
 
-    liter_count = xQueueCreate(1, sizeof(uint16_t));
-    caudal_switch = xSemaphoreCreateBinary();
-
+    data_stg_info(BASE_PATH);
+    
     xTaskCreate(task_caudal, "task_caudal", 1024, NULL, 1, NULL);
     xTaskCreate(task_datalogger, "task_datalogger", 1024 * 4, NULL, 1, NULL);
     xTaskCreate(task_tcp_server, "task_tcp_server", 1024 * 4, NULL, 1, NULL);
