@@ -18,4 +18,11 @@ esp_err_t timestamp_init(void);
  */
 TickType_t timestamp_delay(uint32_t delay);
 
+/**
+ * @brief                   Verifica si el tiempo fue sincronizado hace menos de max_age_sec
+ * @param[in] max_age_sec   Margen de tiempo máximo en segundos desde la última sincronización
+ * @return bool             true si está dentro del tiempo válido, false si superó el límite
+ */
+bool sntp_is_sync_valid(uint32_t max_age_sec);
+
 #endif /* TIMESTAMP_H */
