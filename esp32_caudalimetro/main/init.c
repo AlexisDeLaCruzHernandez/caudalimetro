@@ -55,6 +55,33 @@ esp_err_t gpio_caudal_init(gpio_isr_t isr_handler)
     return ESP_OK;
 }
 
+void wifi_init_sta(EventGroupHandle_t *wifi_event, esp_event_handler_t handler)
+{
+    *wifi_event = xEventGroupCreate(); // Crea el event group 
+    ESP_ERROR_CHECK(esp_netif_init()); // Inicializa la pila de red TCP/IP
+    ESP_ERROR_CHECK(esp_event_loop_create_default()); // Crea loop de eventos para distribuirlos 
+    esp_netif_create_default_wifi_sta(); // Crea la interfaz de red para el modo STA
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT(); // Obtiene la configuración por defecto para inicializar el Wi-Fi
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg)); // Inicializa el Wi-Fi
+
+    // Registra el Handler para eventos relacionados a la conexión Wi-Fi
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, handler, NULL));
+    // Registra el Handler para eventos relacionados con la dirección IP
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, handler, NULL));
+
+    wifi_config_t wifi_config = { // Configuración de la red Wi-Fi
+        .sta = {
+            .ssid = WIFI_SSID,
+            .password = WIFI_PASS,
+        },
+    };
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA)); // Indica el modo STA
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config)); // Carga la configuración de la red
+    ESP_ERROR_CHECK(esp_wifi_start()); // Inicia el controlador de Wi-Fi, provoca WIFI_EVENT_STA_START
+}
+
 bool recv_all(int sock, void *buffer, size_t length) 
 { 
     uint8_t *ptr = (uint8_t *)buffer; 
@@ -99,4 +126,36 @@ bool send_all(int sock, const void *buffer, size_t length)
         sent += (size_t)ret; 
     } 
     return true; 
+}
+
+esp_err_t gpio_error_init(void)
+{
+    esp_err_t ret;
+    gpio_config_t io_conf = {
+        .pin_bit_mask = (1ULL << SNTP_ERROR_PIN),
+        .mode = GPIO_MODE_OUTPUT,
+    };
+
+    // Configuramos el GPIO
+    ret = gpio_config(&io_conf);
+    if(ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error al configurar el GPIO");
+        return ret;
+    }
+    
+    io_conf.pin_bit_mask = (1ULL << WIFI_ERROR_PIN);
+    ret = gpio_config(&io_conf);
+    if(ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error al configurar el GPIO");
+        return ret;
+    }
+
+    io_conf.pin_bit_mask = (1ULL << FLASH_ERROR_PIN);
+    ret = gpio_config(&io_conf);
+    if(ret != ESP_OK) {
+        ESP_LOGE(TAG, "Error al configurar el GPIO");
+        return ret;
+    }
+
+    return ESP_OK;
 }
