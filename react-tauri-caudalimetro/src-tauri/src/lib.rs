@@ -65,9 +65,25 @@ async fn toggle_link_device(
 }
 
 #[tauri::command]
+async fn rename_device(
+    device_id: String,
+    new_name: String,
+    state: State<'_, Arc<DbState>>,
+) -> Result<(), String> {
+    let clean_name = new_name.trim().to_string();
+    if clean_name.is_empty() {
+        return Err("El nombre del dispositivo no puede estar vacío".to_string());
+    }
+    state
+        .update_device_name(&device_id, &clean_name)
+        .map_err(|e| format!("Error renombrando dispositivo: {}", e))
+}
+
+#[tauri::command]
 async fn get_device_range(ip: String, port: u16) -> Result<DateRange, String> {
     protocol::fetch_date_range(&ip, port).await
 }
+
 
 #[tauri::command]
 async fn sync_device_samples(
@@ -78,15 +94,40 @@ async fn sync_device_samples(
     target_end_ts: u32,
     state: State<'_, Arc<DbState>>,
 ) -> Result<usize, String> {
-    // Sincronización Incremental:
-    // 1. Verificar cuál es el timestamp máximo guardado en la BD SQLite para este dispositivo
+    // 1. Consultar cobertura actual en la BD SQLite local
+    let min_local_ts = state
+        .get_min_timestamp(&device_id)
+        .map_err(|e| e.to_string())?;
+
     let max_local_ts = state
         .get_max_timestamp(&device_id)
         .map_err(|e| e.to_string())?;
 
-    // 2. Determinar el inicio efectivo de la descarga
-    let fetch_start_ts = match max_local_ts {
-        Some(max_ts) if max_ts >= target_start_ts => max_ts + 1,
+    // 2. Determinar el inicio de la descarga.
+    // Si la BD local no tiene datos o no ha descargado desde el inicio del hardware (first_ts),
+    // consultar el rango del ESP32 para ingestar todo el historial disponible.
+    let fetch_start_ts = match (min_local_ts, max_local_ts) {
+        (None, _) => {
+            // Primera conexión: solicitar rango del hardware ESP32 para traer todo el historial
+            match protocol::fetch_date_range(&ip, port).await {
+                Ok(range) if range.first_ts > 0 => range.first_ts,
+                _ => target_start_ts,
+            }
+        }
+        (Some(min_ts), Some(max_ts)) => {
+            // Si el rango objetivo solicita datos más antiguos de los que tenemos en SQLite
+            if target_start_ts < min_ts {
+                match protocol::fetch_date_range(&ip, port).await {
+                    Ok(range) if range.first_ts > 0 && range.first_ts < min_ts => range.first_ts,
+                    _ => target_start_ts,
+                }
+            } else if max_ts >= target_start_ts {
+                // Sincronización incremental de deltas nuevos
+                max_ts + 1
+            } else {
+                target_start_ts
+            }
+        }
         _ => target_start_ts,
     };
 
@@ -95,16 +136,17 @@ async fn sync_device_samples(
         return Ok(0);
     }
 
-    // 3. Descargar únicamente el rango faltante desde el ESP32
+    // 3. Descargar el rango de muestras desde el ESP32
     let samples = protocol::download_samples(&ip, port, fetch_start_ts, target_end_ts).await?;
 
-    // 4. Guardar las nuevas muestras en SQLite
+    // 4. Guardar las muestras recibidas en la BD SQLite
     let inserted_count = state
         .save_samples_batch(&device_id, &samples)
         .map_err(|e| format!("Error guardando muestras en SQLite: {}", e))?;
 
     Ok(inserted_count)
 }
+
 
 #[tauri::command]
 async fn get_cached_samples(
@@ -128,6 +170,25 @@ async fn remove_manual_device(
         .map_err(|e| format!("Error eliminando dispositivo de SQLite: {}", e))
 }
 
+#[tauri::command]
+async fn save_excel_file(default_name: String, bytes: Vec<u8>) -> Result<Option<String>, String> {
+    let file_handle = rfd::AsyncFileDialog::new()
+        .set_file_name(&default_name)
+        .add_filter("Libro de Excel", &["xlsx"])
+        .save_file()
+        .await;
+
+    if let Some(file) = file_handle {
+        let path = file.path().to_path_buf();
+        tokio::fs::write(&path, bytes)
+            .await
+            .map_err(|e| format!("Error escribiendo archivo Excel en disco: {}", e))?;
+        Ok(Some(path.to_string_lossy().to_string()))
+    } else {
+        Ok(None)
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db_path = "caudalimetro_cache.db";
@@ -140,13 +201,17 @@ pub fn run() {
             discover_devices,
             add_manual_device,
             toggle_link_device,
+            rename_device,
             remove_manual_device,
             get_device_range,
             sync_device_samples,
-            get_cached_samples
+            get_cached_samples,
+            save_excel_file
         ])
+
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
+
 
 

@@ -19,6 +19,11 @@ export class TauriDeviceService implements IDeviceService {
     await invoke("toggle_link_device", { deviceId, isLinked });
   }
 
+  async renameDevice(deviceId: string, newName: string): Promise<void> {
+    await invoke("rename_device", { deviceId, newName });
+  }
+
+
 
 
   async getDeviceRange(device: Device): Promise<DateRange> {

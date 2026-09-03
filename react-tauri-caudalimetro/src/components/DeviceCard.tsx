@@ -1,18 +1,20 @@
-import React from "react";
+import React, { useState } from "react";
 import { Device } from "../core/types";
 import { useDeviceStore } from "../store/useDeviceStore";
-import { Wifi, WifiOff, CheckSquare, Square, Tag, Trash2, Link2Off, Plus } from "lucide-react";
-
+import { Wifi, WifiOff, CheckSquare, Square, Tag, Trash2, Link2Off, Plus, Pencil, Check, X } from "lucide-react";
 
 interface Props {
   device: Device;
 }
 
 export const DeviceCard: React.FC<Props> = ({ device }) => {
-  const { selectedDeviceIds, toggleDeviceSelection, removeManualDevice, toggleLinkDevice } =
+  const { selectedDeviceIds, toggleDeviceSelection, removeManualDevice, toggleLinkDevice, renameDevice } =
     useDeviceStore();
   const isSelected = selectedDeviceIds.includes(device.id);
   const isLinked = device.is_linked || device.is_manual;
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [nameInput, setNameInput] = useState(device.name);
 
   const handleDelete = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -31,9 +33,35 @@ export const DeviceCard: React.FC<Props> = ({ device }) => {
     toggleLinkDevice(device.id, true);
   };
 
+  const handleStartEditing = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setNameInput(device.name);
+    setIsEditing(true);
+  };
+
+  const handleSaveName = (e: React.MouseEvent | React.FormEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    if (nameInput.trim() && nameInput.trim() !== device.name) {
+      renameDevice(device.id, nameInput.trim());
+    }
+    setIsEditing(false);
+  };
+
+  const handleCancelEditing = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsEditing(false);
+    setNameInput(device.name);
+  };
+
+  // Extraer un hostname o identificador si difiere de la IP
+  const hostnamePart = device.id.includes("manual_")
+    ? null
+    : device.id.split(".")[0];
+
   return (
     <div
-      onClick={() => isLinked && toggleDeviceSelection(device.id)}
+      onClick={() => isLinked && !isEditing && toggleDeviceSelection(device.id)}
       className={`p-3 rounded-xl border transition-all select-none flex items-start gap-2.5 relative group ${
         isLinked
           ? isSelected
@@ -56,9 +84,48 @@ export const DeviceCard: React.FC<Props> = ({ device }) => {
 
       <div className="flex-1 min-w-0">
         <div className="flex items-center justify-between gap-1">
-          <h4 className="text-xs font-bold text-[var(--text-main)] truncate">
-            {device.name}
-          </h4>
+          {isEditing ? (
+            <form onSubmit={handleSaveName} className="flex items-center gap-1 flex-1">
+              <input
+                type="text"
+                autoFocus
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                onClick={(e) => e.stopPropagation()}
+                className="w-full px-1.5 py-0.5 text-xs bg-[var(--bg-main)] border border-[var(--color-primary)] rounded-md text-[var(--text-main)] font-semibold focus:outline-hidden"
+              />
+              <button
+                type="submit"
+                onClick={handleSaveName}
+                title="Guardar nombre"
+                className="p-1 text-emerald-600 hover:bg-emerald-500/10 rounded-md cursor-pointer"
+              >
+                <Check className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={handleCancelEditing}
+                title="Cancelar"
+                className="p-1 text-red-500 hover:bg-red-500/10 rounded-md cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </form>
+          ) : (
+            <div className="flex items-center gap-1 min-w-0 flex-1 group/name">
+              <h4 className="text-xs font-bold text-[var(--text-main)] truncate">
+                {device.name}
+              </h4>
+              <button
+                onClick={handleStartEditing}
+                title="Renombrar dispositivo"
+                className="p-0.5 text-[var(--text-muted)] hover:text-[var(--color-primary)] opacity-0 group-hover/name:opacity-100 transition-opacity cursor-pointer shrink-0"
+              >
+                <Pencil className="w-3 h-3" />
+              </button>
+            </div>
+          )}
+
           <span
             className={`flex items-center gap-1 text-[10px] font-semibold px-1.5 py-0.5 rounded-full shrink-0 ${
               device.is_online
@@ -78,7 +145,9 @@ export const DeviceCard: React.FC<Props> = ({ device }) => {
           </span>
         </div>
 
-        <p className="text-[11px] text-[var(--text-muted)] font-mono mt-0.5">
+        {/* Muestra el Hostname e IP:Puerto */}
+        <p className="text-[11px] text-[var(--text-muted)] font-mono mt-0.5 truncate">
+          {hostnamePart && hostnamePart !== device.name ? `${hostnamePart} • ` : ""}
           {device.ip}:{device.port}
         </p>
 

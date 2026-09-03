@@ -53,6 +53,9 @@ export class SupabaseDeviceService implements IDeviceService {
 
   async toggleLinkDevice(_deviceId: string, _isLinked: boolean): Promise<void> {}
 
+  async renameDevice(_deviceId: string, _newName: string): Promise<void> {}
+
+
 
 
   async getDeviceRange(_device: Device): Promise<DateRange> {

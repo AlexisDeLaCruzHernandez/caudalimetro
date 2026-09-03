@@ -14,7 +14,11 @@ export interface IDeviceService {
   /** Vincula o desvincula un dispositivo */
   toggleLinkDevice(deviceId: string, isLinked: boolean): Promise<void>;
 
+  /** Renombra el nombre legible del dispositivo */
+  renameDevice(deviceId: string, newName: string): Promise<void>;
+
   /** Consulta el rango de fechas de mediciones disponibles en un dispositivo */
+
 
   getDeviceRange(device: Device): Promise<DateRange>;
 

@@ -120,6 +120,16 @@ impl DbState {
         Ok(())
     }
 
+    pub fn update_device_name(&self, id: &str, new_name: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE devices SET name = ?1 WHERE id = ?2",
+            params![new_name, id],
+        )?;
+        Ok(())
+    }
+
+
     pub fn get_devices(&self) -> Result<Vec<DeviceRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
@@ -154,6 +164,14 @@ impl DbState {
         let res: Option<u32> = stmt.query_row(params![device_id], |row| row.get(0)).unwrap_or(None);
         Ok(res)
     }
+
+    pub fn get_min_timestamp(&self, device_id: &str) -> Result<Option<u32>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT MIN(timestamp) FROM samples WHERE device_id = ?1")?;
+        let res: Option<u32> = stmt.query_row(params![device_id], |row| row.get(0)).unwrap_or(None);
+        Ok(res)
+    }
+
 
     pub fn save_samples_batch(&self, device_id: &str, samples: &[Sample]) -> Result<usize> {
         let mut conn = self.conn.lock().unwrap();

@@ -1,6 +1,6 @@
 import React from "react";
 import { useDeviceStore } from "../store/useDeviceStore";
-import { Droplet, Sun, Moon, Cpu, Globe, FlaskConical } from "lucide-react";
+import { Droplet, Sun, Moon, Cpu, FlaskConical } from "lucide-react";
 
 
 export const Header: React.FC = () => {
@@ -38,7 +38,7 @@ export const Header: React.FC = () => {
             <span className="hidden sm:inline">Tauri LAN</span>
           </button>
 
-          <button
+          {/* <button
             onClick={() => switchEnvironment("web")}
             title="Entorno Web (Supabase Cloud)"
             className={`flex items-center gap-1.5 px-2.5 py-1 text-xs font-medium rounded-md transition-all cursor-pointer ${
@@ -49,7 +49,7 @@ export const Header: React.FC = () => {
           >
             <Globe className="w-3.5 h-3.5" />
             <span className="hidden sm:inline">Web Cloud</span>
-          </button>
+          </button> */}
 
           <button
             onClick={() => switchEnvironment("mock")}

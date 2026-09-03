@@ -27,4 +27,6 @@ byteorder = "1.5"
 rusqlite = { version = "0.31", features = ["bundled"] }
 mdns-sd = "0.11"
 chrono = "0.4"
+rfd = "0.14"
+
 

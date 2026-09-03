@@ -5,6 +5,9 @@ import {
   getCurrentEnvironment,
   setEnvironmentOverride,
 } from "../services/ServiceProvider";
+import { exportDatasetsToExcel, ExportDataset, ExportResult } from "../utils/excelExporter";
+
+
 
 interface DeviceState {
   devices: Device[];
@@ -26,15 +29,20 @@ interface DeviceState {
   toggleDeviceSelection: (deviceId: string) => void;
 
   toggleLinkDevice: (deviceId: string, isLinked: boolean) => Promise<void>;
+  renameDevice: (deviceId: string, newName: string) => Promise<void>;
   selectSingleDevice: (deviceId: string) => void;
+
   selectedPresetLabel: string;
   setSelectedPresetLabel: (label: string) => void;
   setDateRange: (startTs: number, endTs: number, presetLabel?: string) => void;
   loadSamples: () => Promise<void>;
   syncAndFetchSamples: () => Promise<void>;
+  exportToExcel: (mode: "active_full" | "active_range" | "all_range") => Promise<ExportResult>;
   toggleDarkMode: () => void;
   switchEnvironment: (env: AppEnvironment) => Promise<void>;
 }
+
+
 
 const sevenDaysSec = 7 * 24 * 3600;
 const nowSec = Math.floor(Date.now() / 1000);
@@ -141,6 +149,7 @@ export const useDeviceStore = create<DeviceState>((set, get) => ({
         if (!get().selectedDeviceIds.includes(deviceId)) {
           get().toggleDeviceSelection(deviceId);
         }
+        await get().syncAndFetchSamples();
       } else {
         const updatedSelected = get().selectedDeviceIds.filter((id) => id !== deviceId);
         set({
@@ -149,10 +158,28 @@ export const useDeviceStore = create<DeviceState>((set, get) => ({
         });
         get().loadSamples();
       }
+
     } catch (e: any) {
       set({ error: e?.toString() || "Error al cambiar estado de vinculación" });
     }
   },
+
+  renameDevice: async (deviceId: string, newName: string) => {
+    const cleanName = newName.trim();
+    if (!cleanName) return;
+    set({ error: null });
+    try {
+      const service = getDeviceService();
+      await service.renameDevice(deviceId, cleanName);
+      const updatedList = get().devices.map((d) =>
+        d.id === deviceId ? { ...d, name: cleanName } : d
+      );
+      set({ devices: updatedList });
+    } catch (e: any) {
+      set({ error: e?.toString() || "Error renombrando dispositivo" });
+    }
+  },
+
 
   toggleDeviceSelection: (deviceId: string) => {
     const current = get().selectedDeviceIds;
@@ -245,6 +272,62 @@ export const useDeviceStore = create<DeviceState>((set, get) => ({
     // 3. Forzar recarga de datos en la tienda y refresco reactivo de la gráfica
     await get().loadSamples();
   },
+
+  exportToExcel: async (mode: "active_full" | "active_range" | "all_range"): Promise<ExportResult> => {
+    const { activeDeviceId, selectedDeviceIds, devices, dateRange, samplesByDevice } = get();
+    const service = getDeviceService();
+
+    if (mode === "active_full") {
+      const devId = activeDeviceId || (selectedDeviceIds.length > 0 ? selectedDeviceIds[0] : null);
+      if (!devId) {
+        return { success: false, message: "Por favor selecciona un dispositivo para exportar." };
+      }
+      const dev = devices.find((d) => d.id === devId);
+      if (!dev) return { success: false, message: "Dispositivo no encontrado." };
+
+      const samples = await service.getCachedSamples(devId, 0, 2147483647);
+      return await exportDatasetsToExcel(
+        [{ device: dev, samples, customSheetName: "Historial_Completo" }],
+        `Historial_Completo_${dev.name.replace(/\s+/g, "_")}`
+      );
+    } else if (mode === "active_range") {
+      const devId = activeDeviceId || (selectedDeviceIds.length > 0 ? selectedDeviceIds[0] : null);
+      if (!devId) {
+        return { success: false, message: "Por favor selecciona un dispositivo para exportar." };
+      }
+      const dev = devices.find((d) => d.id === devId);
+      if (!dev) return { success: false, message: "Dispositivo no encontrado." };
+
+      const samples =
+        samplesByDevice[devId] ||
+        (await service.getCachedSamples(devId, dateRange.startTs, dateRange.endTs));
+      return await exportDatasetsToExcel(
+        [{ device: dev, samples, customSheetName: "Rango_Seleccionado" }],
+        `Reporte_Rango_${dev.name.replace(/\s+/g, "_")}`
+      );
+    } else if (mode === "all_range") {
+      if (selectedDeviceIds.length === 0) {
+        return { success: false, message: "No hay dispositivos seleccionados para exportar." };
+      }
+
+      const datasets: ExportDataset[] = [];
+      for (const devId of selectedDeviceIds) {
+        const dev = devices.find((d) => d.id === devId);
+        if (!dev) continue;
+
+        const samples =
+          samplesByDevice[devId] ||
+          (await service.getCachedSamples(devId, dateRange.startTs, dateRange.endTs));
+        datasets.push({ device: dev, samples, customSheetName: dev.name });
+      }
+
+      return await exportDatasetsToExcel(datasets, "Reporte_MultiDispositivo");
+    }
+
+    return { success: false, message: "Modo de exportación no válido." };
+  },
+
+
 
 
   toggleDarkMode: () => {

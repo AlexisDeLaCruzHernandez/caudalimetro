@@ -93,6 +93,15 @@ export class MockDeviceService implements IDeviceService {
     }
   }
 
+  async renameDevice(deviceId: string, newName: string): Promise<void> {
+    await new Promise((res) => setTimeout(res, 100));
+    const dev = this.devices.find((d) => d.id === deviceId);
+    if (dev) {
+      dev.name = newName;
+    }
+  }
+
+
 
 
   async getDeviceRange(device: Device): Promise<DateRange> {

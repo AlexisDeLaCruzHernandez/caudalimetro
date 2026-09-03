@@ -3,11 +3,13 @@ import ReactECharts from "echarts-for-react";
 import { useDeviceStore } from "../store/useDeviceStore";
 import { getChartPalette, getCssVar } from "../utils/theme";
 import { formatDate } from "../utils/date";
+import { ExportDropdown } from "./ExportDropdown";
 import { Activity, RefreshCw } from "lucide-react";
 
 export const FlowChart: React.FC = () => {
   const { selectedDeviceIds, devices, samplesByDevice, isDarkMode, syncAndFetchSamples, isSyncing } =
     useDeviceStore();
+
 
   const selectedDevices = useMemo(() => {
     return devices.filter((d) => selectedDeviceIds.includes(d.id));
@@ -149,14 +151,19 @@ export const FlowChart: React.FC = () => {
           </h2>
         </div>
 
-        <button
-          onClick={() => syncAndFetchSamples()}
-          disabled={isSyncing || selectedDeviceIds.length === 0}
-          className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] disabled:opacity-50 rounded-lg transition-all cursor-pointer"
-        >
-          <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
-          {isSyncing ? "Sincronizando..." : "Sincronizar Datos"}
-        </button>
+        <div className="flex items-center gap-2">
+          <ExportDropdown />
+
+          <button
+            onClick={() => syncAndFetchSamples()}
+            disabled={isSyncing || selectedDeviceIds.length === 0}
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-white bg-[var(--color-primary)] hover:bg-[var(--color-primary-hover)] disabled:opacity-50 rounded-lg transition-all cursor-pointer"
+          >
+            <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? "animate-spin" : ""}`} />
+            {isSyncing ? "Sincronizando..." : "Sincronizar Datos"}
+          </button>
+        </div>
+
       </div>
 
       {selectedDeviceIds.length === 0 ? (
