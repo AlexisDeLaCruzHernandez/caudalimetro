@@ -283,7 +283,7 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Inicializando leds de error");
     ESP_ERROR_CHECK(gpio_error_init());
-    xTaskCreate(task_led_error, "task_led_error", 1024, NULL, 1, NULL);
+    xTaskCreate(task_led_error, "task_led_error", 1024 * 2, NULL, 1, NULL);
 
     ESP_LOGI(TAG, "Inicializando nvs flash");
     ESP_ERROR_CHECK(nvs_flash_init());
@@ -297,6 +297,9 @@ void app_main(void)
 
     ESP_LOGI(TAG, "Inicializando Wi-Fi");
     wifi_init_sta(&wifi_event_group, wifi_event_handler);
+
+    ESP_LOGI(TAG, "Inicializando mDNS");
+    ESP_ERROR_CHECK(mdns_server_init("esp32-caudalimetro", "ESP32 Caudalimetro"));
     
     ESP_LOGI(TAG, "Inicializando sntp");
     ESP_ERROR_CHECK(timestamp_init());
@@ -306,7 +309,7 @@ void app_main(void)
 
     data_stg_info(BASE_PATH);
     
-    xTaskCreate(task_caudal, "task_caudal", 1024, NULL, 1, NULL);
+    xTaskCreate(task_caudal, "task_caudal", 1024 * 4, NULL, 1, NULL);
     xTaskCreate(task_datalogger, "task_datalogger", 1024 * 4, NULL, 1, NULL);
     xTaskCreate(task_tcp_server, "task_tcp_server", 1024 * 4, NULL, 1, NULL);
 }

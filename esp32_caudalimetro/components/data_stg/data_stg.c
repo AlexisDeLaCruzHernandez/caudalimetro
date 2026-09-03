@@ -10,7 +10,7 @@ esp_err_t data_stg_mount(void)
         .partition_label = PARTITION_LABEL,
         .mount_config = {
             .max_files = 1,
-            .format_if_mount_failed = false,
+            .format_if_mount_failed = true,
             .allocation_unit_size = CONFIG_WL_SECTOR_SIZE,
         }
     };

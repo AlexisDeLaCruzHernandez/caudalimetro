@@ -159,3 +159,33 @@ esp_err_t gpio_error_init(void)
 
     return ESP_OK;
 }
+
+/**
+ * @brief Inicializa el servicio mDNS y anuncia el servidor TCP
+ * @param[in] hostname Nombre del dispositivo (ej. "caudalimetro" -> caudalimetro.local)
+ * @param[in] instance_name Nombre descriptivo para el descubrimiento en red
+ * @retval ESP_OK Inicialización correcta
+ */
+esp_err_t mdns_server_init(const char *hostname, const char *instance_name)
+{
+    // Inicializar el demonio mDNS
+    esp_err_t err = mdns_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Error al inicializar mDNS: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    // Configurar el hostname (lo que va antes de .local)
+    mdns_hostname_set(hostname);
+    
+    // Configurar el nombre de la instancia 
+    mdns_instance_name_set(instance_name);
+
+    // Anunciar el servicio TCP de tu datalogger para que la GUI lo descubra automáticamente
+    // Formato: instance_name, service_type, proto, port, txt_data, num_items
+    mdns_service_add(instance_name, "_datalogger", "_tcp", 3333, NULL, 0);
+
+    ESP_LOGI(TAG, "mDNS inicializado. Accesible en: %s.local", hostname);
+    
+    return ESP_OK;
+}
