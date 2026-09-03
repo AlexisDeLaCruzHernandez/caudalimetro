@@ -299,7 +299,7 @@ void app_main(void)
     wifi_init_sta(&wifi_event_group, wifi_event_handler);
 
     ESP_LOGI(TAG, "Inicializando mDNS");
-    ESP_ERROR_CHECK(mdns_server_init("esp32-caudalimetro", "ESP32 Caudalimetro"));
+    ESP_ERROR_CHECK(mdns_server_init(MDNS_HOSTNAME, MDNS_INSTANCE_NAME));
     
     ESP_LOGI(TAG, "Inicializando sntp");
     ESP_ERROR_CHECK(timestamp_init());
