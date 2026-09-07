@@ -12,10 +12,14 @@
     --color-primary-hover: #0369a1;
     --status-online: #16a34a;
     --status-offline: #dc2626;
-    --chart-series-1: #0284c7;
-    --chart-series-2: #0d9488;
-    --chart-series-3: #8b5cf6;
-    --chart-series-4: #f59e0b;
+    --chart-series-1: #0284c7; /* Azul Océano */
+    --chart-series-2: #e11d48; /* Rosa Carmesí */
+    --chart-series-3: #d97706; /* Ámbar Dorado */
+    --chart-series-4: #059669; /* Verde Esmeralda */
+    --chart-series-5: #7c3aed; /* Violeta Intenso */
+    --chart-series-6: #0891b2; /* Cian Turquesa */
+    --chart-series-7: #c026d3; /* Fucsia Mágico */
+    --chart-series-8: #4d7c0f; /* Verde Lima */
     --chart-grid: #e2e8f0;
   }
 
@@ -30,12 +34,17 @@
     --color-primary-hover: #7dd3fc;
     --status-online: #22c55e;
     --status-offline: #ef4444;
-    --chart-series-1: #38bdf8;
-    --chart-series-2: #2dd4bf;
-    --chart-series-3: #a78bfa;
-    --chart-series-4: #fbbf24;
+    --chart-series-1: #38bdf8; /* Azul Cielo */
+    --chart-series-2: #f43f5e; /* Rosa Vibrante */
+    --chart-series-3: #fbbf24; /* Ámbar Claro */
+    --chart-series-4: #34d399; /* Verde Claro */
+    --chart-series-5: #a78bfa; /* Violeta Claro */
+    --chart-series-6: #22d3ee; /* Cian Claro */
+    --chart-series-7: #e879f9; /* Fucsia Claro */
+    --chart-series-8: #a3e635; /* Lima Claro */
     --chart-grid: #334155;
   }
+
 }
 
 body {

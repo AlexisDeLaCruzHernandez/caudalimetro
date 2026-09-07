@@ -14,7 +14,10 @@ pub struct DateRange {
 pub struct Sample {
     pub timestamp: u32,
     pub volume: u16,
+    #[serde(default)]
+    pub monthly_accumulated: u32,
 }
+
 
 /// Lee exactamente `num_bytes` del stream TCP asíncrono
 async fn recv_exact(stream: &mut TcpStream, num_bytes: usize) -> io::Result<Vec<u8>> {
@@ -117,8 +120,13 @@ pub async fn download_samples(
         let timestamp = ReadBytesExt::read_u32::<BigEndian>(&mut slice).map_err(|e| e.to_string())?;
         let volume = ReadBytesExt::read_u16::<BigEndian>(&mut slice).map_err(|e| e.to_string())?;
 
-        samples.push(Sample { timestamp, volume });
+        samples.push(Sample {
+            timestamp,
+            volume,
+            monthly_accumulated: 0,
+        });
     }
+
 
     Ok(samples)
 }

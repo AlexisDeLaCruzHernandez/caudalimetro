@@ -38,9 +38,11 @@ interface DeviceState {
   loadSamples: () => Promise<void>;
   syncAndFetchSamples: () => Promise<void>;
   exportToExcel: (mode: "active_full" | "active_range" | "all_range") => Promise<ExportResult>;
+  recalculateAccumulated: (deviceId?: string) => Promise<number>;
   toggleDarkMode: () => void;
   switchEnvironment: (env: AppEnvironment) => Promise<void>;
 }
+
 
 
 
@@ -241,6 +243,9 @@ export const useDeviceStore = create<DeviceState>((set, get) => ({
     set({ isSyncing: true, error: null });
     const service = getDeviceService();
 
+    // 0. Cargar inmediatamente datos históricos existentes de la BD (para visualización offline)
+    await get().loadSamples();
+
     // 1. Refrescar la ventana de tiempo si un preset relativo está activo o si el 'Hasta' es futuro/actual
     let currentStart = dateRange.startTs;
     let currentEnd = dateRange.endTs;
@@ -268,10 +273,38 @@ export const useDeviceStore = create<DeviceState>((set, get) => ({
       }
     }
 
+    // 3. Refrescar dispositivos para reflejar estado Online/Offline actualizado
+    try {
+      const updatedDevices = await service.discoverDevices();
+      set({ devices: updatedDevices });
+    } catch (_) {}
+
     set({ isSyncing: false });
-    // 3. Forzar recarga de datos en la tienda y refresco reactivo de la gráfica
+    // 4. Forzar recarga de datos en la tienda y refresco reactivo de la gráfica
     await get().loadSamples();
   },
+
+  recalculateAccumulated: async (deviceId?: string): Promise<number> => {
+    const isTauri =
+      typeof window !== "undefined" &&
+      ("__TAURI_INTERNALS__" in window || "__TAURI__" in window);
+
+    let updatedCount = 0;
+    if (isTauri) {
+      try {
+        const { invoke } = await import("@tauri-apps/api/core");
+        updatedCount = await invoke<number>("recalculate_monthly_accumulated", { deviceId });
+      } catch (e) {
+        console.error("Error al invocar recalculate_monthly_accumulated:", e);
+      }
+    }
+
+    await get().loadSamples();
+    return updatedCount;
+  },
+
+
+
 
   exportToExcel: async (mode: "active_full" | "active_range" | "all_range"): Promise<ExportResult> => {
     const { activeDeviceId, selectedDeviceIds, devices, dateRange, samplesByDevice } = get();

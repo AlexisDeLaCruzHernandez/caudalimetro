@@ -64,16 +64,32 @@ impl DbState {
                 device_id TEXT NOT NULL,
                 timestamp INTEGER NOT NULL,
                 volume INTEGER NOT NULL,
+                monthly_accumulated INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (device_id, timestamp)
             )",
             [],
         )?;
 
+        // Intentar agregar la columna monthly_accumulated si la tabla existía previamente
+        let _ = conn.execute(
+            "ALTER TABLE samples ADD COLUMN monthly_accumulated INTEGER NOT NULL DEFAULT 0",
+            [],
+        );
+
         Ok(())
     }
 
+    pub fn set_device_online(&self, id: &str, is_online: bool) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE devices SET is_online = ?1 WHERE id = ?2",
+            params![if is_online { 1 } else { 0 }, id],
+        )?;
+        Ok(())
+    }
 
     pub fn upsert_device(&self, device: &DeviceRecord) -> Result<()> {
+
         let conn = self.conn.lock().unwrap();
 
         // Buscar si ya existe un registro guardado con el mismo ID, IP o Nombre
@@ -180,11 +196,43 @@ impl DbState {
         let mut count = 0;
         {
             let mut stmt = tx.prepare(
-                "INSERT OR REPLACE INTO samples (device_id, timestamp, volume) VALUES (?1, ?2, ?3)",
+                "INSERT INTO samples (device_id, timestamp, volume) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(device_id, timestamp) DO UPDATE SET volume = excluded.volume",
             )?;
             for sample in samples {
                 stmt.execute(params![device_id, sample.timestamp, sample.volume])?;
                 count += 1;
+            }
+        }
+
+        // Recalcular acumulado mensual para todas las muestras guardadas del dispositivo
+        {
+            let mut query_stmt = tx.prepare(
+                "SELECT timestamp, volume FROM samples WHERE device_id = ?1 ORDER BY timestamp ASC",
+            )?;
+            let rows: Vec<(u32, u16)> = query_stmt
+                .query_map(params![device_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<Result<_, _>>()?;
+
+            let mut update_stmt = tx.prepare(
+                "UPDATE samples SET monthly_accumulated = ?1 WHERE device_id = ?2 AND timestamp = ?3",
+            )?;
+
+            let mut current_month_key = String::new();
+            let mut running_sum: u32 = 0;
+
+            for (ts, vol) in rows {
+                let month_key = chrono::DateTime::from_timestamp(ts as i64, 0)
+                    .map(|d| d.format("%Y-%m").to_string())
+                    .unwrap_or_default();
+
+                if month_key != current_month_key {
+                    current_month_key = month_key;
+                    running_sum = 0;
+                }
+
+                running_sum += vol as u32;
+                update_stmt.execute(params![running_sum, device_id, ts])?;
             }
         }
 
@@ -200,7 +248,7 @@ impl DbState {
     ) -> Result<Vec<Sample>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT timestamp, volume FROM samples 
+            "SELECT timestamp, volume, monthly_accumulated FROM samples 
              WHERE device_id = ?1 AND timestamp >= ?2 AND timestamp <= ?3 
              ORDER BY timestamp ASC",
         )?;
@@ -209,6 +257,7 @@ impl DbState {
             Ok(Sample {
                 timestamp: row.get(0)?,
                 volume: row.get(1)?,
+                monthly_accumulated: row.get(2)?,
             })
         })?;
 
@@ -219,6 +268,57 @@ impl DbState {
         Ok(samples)
     }
 
+
+    pub fn recalculate_monthly_accumulated(&self, target_device_id: Option<&str>) -> Result<usize> {
+        let mut conn = self.conn.lock().unwrap();
+        let tx = conn.transaction()?;
+
+        let device_ids: Vec<String> = match target_device_id {
+            Some(id) if !id.trim().is_empty() => vec![id.to_string()],
+            _ => {
+                let mut stmt = tx.prepare("SELECT DISTINCT device_id FROM samples")?;
+                let rows = stmt.query_map([], |row| row.get(0))?;
+                rows.collect::<Result<_, _>>()?
+            }
+        };
+
+        let mut total_updated = 0;
+
+        for dev_id in device_ids {
+            let mut query_stmt = tx.prepare(
+                "SELECT timestamp, volume FROM samples WHERE device_id = ?1 ORDER BY timestamp ASC",
+            )?;
+            let rows: Vec<(u32, u16)> = query_stmt
+                .query_map(params![dev_id], |row| Ok((row.get(0)?, row.get(1)?)))?
+                .collect::<Result<_, _>>()?;
+
+            let mut update_stmt = tx.prepare(
+                "UPDATE samples SET monthly_accumulated = ?1 WHERE device_id = ?2 AND timestamp = ?3",
+            )?;
+
+            let mut current_month_key = String::new();
+            let mut running_sum: u32 = 0;
+
+            for (ts, vol) in rows {
+                let month_key = chrono::DateTime::from_timestamp(ts as i64, 0)
+                    .map(|d| d.format("%Y-%m").to_string())
+                    .unwrap_or_default();
+
+                if month_key != current_month_key {
+                    current_month_key = month_key;
+                    running_sum = 0;
+                }
+
+                running_sum += vol as u32;
+                update_stmt.execute(params![running_sum, dev_id, ts])?;
+                total_updated += 1;
+            }
+        }
+
+        tx.commit()?;
+        Ok(total_updated)
+    }
+
     pub fn delete_device(&self, device_id: &str) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute("DELETE FROM devices WHERE id = ?1", params![device_id])?;
@@ -226,3 +326,4 @@ impl DbState {
         Ok(())
     }
 }
+

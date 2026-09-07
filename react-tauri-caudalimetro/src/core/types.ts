@@ -18,7 +18,9 @@ export interface DateRange {
 export interface Sample {
   timestamp: number;
   volume: number;
+  monthly_accumulated?: number;
 }
+
 
 export interface SyncStatus {
   deviceId: string;

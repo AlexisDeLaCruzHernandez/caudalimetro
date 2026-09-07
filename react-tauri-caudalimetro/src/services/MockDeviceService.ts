@@ -38,18 +38,28 @@ export class MockDeviceService implements IDeviceService {
 
     const samples: Sample[] = [];
     let curTime = startTime;
-    let cumVolume = 1000;
+    let currentMonthKey = "";
+    let monthlyAccumulated = 0;
 
     while (curTime <= now) {
-      // Simular variación de consumo durante el día
-      const hour = new Date(curTime * 1000).getHours();
-      const peakFactor = (hour >= 7 && hour <= 10) || (hour >= 18 && hour <= 22) ? 2.5 : 0.8;
-      const flow = Math.round((Math.sin(curTime / 10000) * 15 + baseVolume) * peakFactor);
+      const date = new Date(curTime * 1000);
+      const monthKey = `${date.getFullYear()}-${date.getMonth() + 1}`;
+      if (monthKey !== currentMonthKey) {
+        currentMonthKey = monthKey;
+        monthlyAccumulated = 0;
+      }
 
-      cumVolume += Math.max(5, flow);
+      // Simular variación de consumo durante el día (volumen del intervalo)
+      const hour = date.getHours();
+      const peakFactor = (hour >= 7 && hour <= 10) || (hour >= 18 && hour <= 22) ? 2.5 : 0.8;
+      const intervalVolume = Math.round((Math.sin(curTime / 10000) * 15 + baseVolume) * peakFactor);
+
+      monthlyAccumulated += Math.max(5, intervalVolume);
+
       samples.push({
         timestamp: curTime,
-        volume: cumVolume,
+        volume: Math.max(5, intervalVolume),
+        monthly_accumulated: monthlyAccumulated,
       });
 
       curTime += intervalSec;
@@ -57,6 +67,7 @@ export class MockDeviceService implements IDeviceService {
 
     this.samplesStore.set(deviceId, samples);
   }
+
 
   async discoverDevices(): Promise<Device[]> {
     await new Promise((res) => setTimeout(res, 500));

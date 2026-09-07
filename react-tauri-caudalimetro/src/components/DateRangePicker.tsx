@@ -68,6 +68,24 @@ export const DateRangePicker: React.FC = () => {
     setIsOpen(false);
   };
 
+  const handleCalendarFromChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    if (!val) return;
+    const d = new Date(val);
+    if (!isNaN(d.getTime())) {
+      setFromInput(formatDate(Math.floor(d.getTime() / 1000), true));
+    }
+  };
+
+  const handleCalendarToChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    if (!val) return;
+    const d = new Date(val);
+    if (!isNaN(d.getTime())) {
+      setToInput(formatDate(Math.floor(d.getTime() / 1000), true));
+    }
+  };
+
   const handleApplyCustom = (e: React.FormEvent) => {
     e.preventDefault();
     const startTs = parseFormattedDate(fromInput);
@@ -86,7 +104,6 @@ export const DateRangePicker: React.FC = () => {
     setDateRange(startTs, endTs, "Personalizado");
     setIsOpen(false);
   };
-
 
   // Formateador Grafana para el botón principal con formato estricto YYYY/MM/DD HH:mm
   const formattedDisplayRange = () => {
@@ -116,7 +133,7 @@ export const DateRangePicker: React.FC = () => {
             <div>
               <div className="flex items-center gap-2 text-xs font-bold text-[var(--text-main)] mb-3 pb-1 border-b border-[var(--border-color)]">
                 <Clock className="w-3.5 h-3.5 text-[var(--color-primary)]" />
-                <span>Rango Personalizado (YYYY/MM/DD HH:mm)</span>
+                <span>Rango Personalizado</span>
               </div>
 
               <form onSubmit={handleApplyCustom} className="space-y-3">
@@ -124,26 +141,46 @@ export const DateRangePicker: React.FC = () => {
                   <label className="block text-[11px] font-semibold text-[var(--text-muted)] mb-1">
                     Desde:
                   </label>
-                  <input
-                    type="text"
-                    placeholder="YYYY/MM/DD HH:mm"
-                    value={fromInput}
-                    onChange={(e) => setFromInput(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[var(--color-primary)] text-[var(--text-main)] font-mono"
-                  />
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="YYYY/MM/DD HH:mm"
+                      value={fromInput}
+                      onChange={(e) => setFromInput(e.target.value)}
+                      className="flex-1 px-2.5 py-1.5 text-xs bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[var(--color-primary)] text-[var(--text-main)] font-mono"
+                    />
+                    <div className="relative group/cal cursor-pointer p-1.5 bg-[var(--bg-main)] border border-[var(--border-color)] hover:border-[var(--color-primary)] rounded-lg transition-all" title="Seleccionar fecha y hora en el calendario">
+                      <Calendar className="w-4 h-4 text-[var(--color-primary)]" />
+                      <input
+                        type="datetime-local"
+                        onChange={handleCalendarFromChange}
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <div>
                   <label className="block text-[11px] font-semibold text-[var(--text-muted)] mb-1">
                     Hasta:
                   </label>
-                  <input
-                    type="text"
-                    placeholder="YYYY/MM/DD HH:mm"
-                    value={toInput}
-                    onChange={(e) => setToInput(e.target.value)}
-                    className="w-full px-2.5 py-1.5 text-xs bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[var(--color-primary)] text-[var(--text-main)] font-mono"
-                  />
+                  <div className="flex items-center gap-1.5">
+                    <input
+                      type="text"
+                      placeholder="YYYY/MM/DD HH:mm"
+                      value={toInput}
+                      onChange={(e) => setToInput(e.target.value)}
+                      className="flex-1 px-2.5 py-1.5 text-xs bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg focus:outline-hidden focus:ring-1 focus:ring-[var(--color-primary)] text-[var(--text-main)] font-mono"
+                    />
+                    <div className="relative group/cal cursor-pointer p-1.5 bg-[var(--bg-main)] border border-[var(--border-color)] hover:border-[var(--color-primary)] rounded-lg transition-all" title="Seleccionar fecha y hora en el calendario">
+                      <Calendar className="w-4 h-4 text-[var(--color-primary)]" />
+                      <input
+                        type="datetime-local"
+                        onChange={handleCalendarToChange}
+                        className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 <button
@@ -156,6 +193,7 @@ export const DateRangePicker: React.FC = () => {
               </form>
             </div>
           </div>
+
 
           {/* Columna 2: Opciones Rápidas Scrolleables */}
           <div className="flex flex-col space-y-2">

@@ -132,12 +132,21 @@ async fn sync_device_samples(
     };
 
     if fetch_start_ts > target_end_ts {
-        // Ya se tienen todos los datos sincronizados en SQLite
+        let _ = state.set_device_online(&device_id, true);
         return Ok(0);
     }
 
-    // 3. Descargar el rango de muestras desde el ESP32
-    let samples = protocol::download_samples(&ip, port, fetch_start_ts, target_end_ts).await?;
+    // 3. Descargar el rango de muestras desde el ESP32 y actualizar estado Online/Offline
+    let samples = match protocol::download_samples(&ip, port, fetch_start_ts, target_end_ts).await {
+        Ok(s) => {
+            let _ = state.set_device_online(&device_id, true);
+            s
+        }
+        Err(e) => {
+            let _ = state.set_device_online(&device_id, false);
+            return Err(e);
+        }
+    };
 
     // 4. Guardar las muestras recibidas en la BD SQLite
     let inserted_count = state
@@ -146,6 +155,7 @@ async fn sync_device_samples(
 
     Ok(inserted_count)
 }
+
 
 
 #[tauri::command]
@@ -189,6 +199,16 @@ async fn save_excel_file(default_name: String, bytes: Vec<u8>) -> Result<Option<
     }
 }
 
+#[tauri::command]
+async fn recalculate_monthly_accumulated(
+    device_id: Option<String>,
+    state: State<'_, Arc<DbState>>,
+) -> Result<usize, String> {
+    state
+        .recalculate_monthly_accumulated(device_id.as_deref())
+        .map_err(|e| format!("Error recalculando acumulados en SQLite: {}", e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db_path = "caudalimetro_cache.db";
@@ -206,12 +226,10 @@ pub fn run() {
             get_device_range,
             sync_device_samples,
             get_cached_samples,
-            save_excel_file
+            save_excel_file,
+            recalculate_monthly_accumulated
         ])
 
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
-
-
-
