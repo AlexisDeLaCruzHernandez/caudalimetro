@@ -13,6 +13,7 @@
 
 static const char *TAG = "MAIN";
 
+TaskHandle_t h_datalogger;
 SemaphoreHandle_t caudal_switch;
 QueueHandle_t liter_count;
 QueueHandle_t led_error;
@@ -235,6 +236,24 @@ void task_tcp_server(void *params)
 
         time_t start_time = (time_t)ntohl(request.start_time);
         time_t end_time = (time_t)ntohl(request.end_time);
+
+        // Si llegó en start_time 0x0 indica actualización OTA
+        if(start_time == OTA_MAGIC_WORD) {
+            // Detener tarea de datalogger que escribe en flash
+            vTaskSuspend(h_datalogger);
+
+            size_t firmware_size = (size_t)end_time;
+            ota_tcp_recv(sock, firmware_size);
+
+            // Si se recibió todo ok no llega hasta acá, por lo que es un error
+            char error_msg[] = "OTA_ERR";
+            send_all(sock, error_msg, strlen(error_msg));
+
+            vTaskResume(h_datalogger);
+            shutdown(sock, SHUT_RDWR);
+            close(sock);
+            continue;
+        }
         
         char first_time_str[32];
         char last_time_str[32];
@@ -310,6 +329,6 @@ void app_main(void)
     data_stg_info(BASE_PATH);
     
     xTaskCreate(task_caudal, "task_caudal", 1024 * 4, NULL, 1, NULL);
-    xTaskCreate(task_datalogger, "task_datalogger", 1024 * 4, NULL, 1, NULL);
-    xTaskCreate(task_tcp_server, "task_tcp_server", 1024 * 4, NULL, 1, NULL);
+    xTaskCreate(task_datalogger, "task_datalogger", 1024 * 4, NULL, 1, &h_datalogger);
+    xTaskCreate(task_tcp_server, "task_tcp_server", 1024 * 8, NULL, 1, NULL);
 }
