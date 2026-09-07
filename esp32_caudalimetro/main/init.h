@@ -19,10 +19,10 @@
 
 #define TCP_PORT            3333
 
-#define WIFI_SSID           "Redmi Note 11"
-#define WIFI_PASS           "23060144"
+#define WIFI_SSID           "Speedy-Fibra"
+#define WIFI_PASS           "casa1234"
 
-#define MDNS_HOSTNAME       "caudalimetro-02"
+#define MDNS_HOSTNAME       "caudalimetro-01"
 #define MDNS_INSTANCE_NAME  "ESP32 Caudalimetro"
 
 #define SLEEP_TIME_MS       500
