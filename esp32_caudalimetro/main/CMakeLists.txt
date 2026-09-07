@@ -6,5 +6,6 @@ idf_component_register(
         timestamp
         nvs_flash 
         esp_wifi
+        app_update
         mdns
 )
