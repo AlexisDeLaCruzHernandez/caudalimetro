@@ -9,6 +9,7 @@
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
 #include "mdns.h"
+#include "esp_ota_ops.h"
 
 #define BUFFER_SIZE         256
 #define INTERVAL_MIN        0.25
@@ -18,6 +19,7 @@
 #define DEBOUNCE_TIME_MS    20
 
 #define TCP_PORT            3333
+#define OTA_MAGIC_WORD      0x0
 
 #define WIFI_SSID           "Speedy-Fibra"
 #define WIFI_PASS           "casa1234"
@@ -69,5 +71,7 @@ bool send_all(int sock, const void *buffer, size_t length);
 esp_err_t gpio_error_init(void);
 
 esp_err_t mdns_server_init(const char *hostname, const char *instance_name);
+
+void ota_tcp_recv(int sock, size_t file_size);
 
 #endif /* INIT_H */

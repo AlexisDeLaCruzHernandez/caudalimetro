@@ -189,3 +189,71 @@ esp_err_t mdns_server_init(const char *hostname, const char *instance_name)
     
     return ESP_OK;
 }
+
+void ota_tcp_recv(int sock, size_t file_size)
+{
+    ESP_LOGI(TAG, "Iniciando OTA por TCP. Tamaño esperado: %zu bytes", file_size);
+
+    // Encuentra la partición disponible para actualizar
+    const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
+    if(update_partition == NULL) {
+        ESP_LOGE(TAG, "No se encontró partición OTA pasiva");
+        return;
+    }
+
+    ESP_LOGI(TAG, "Escribiendo en partición: %s", update_partition->label);
+
+    esp_ota_handle_t update_handle = 0;
+    // Inicia el OTA
+    esp_err_t err = esp_ota_begin(update_partition, OTA_WITH_SEQUENTIAL_WRITES, &update_handle);
+    if(err != ESP_OK) {
+        ESP_LOGE(TAG, "Error en esp_ota_begin: %s", esp_err_to_name(err));
+        return;
+    }
+
+    char ota_buff[1024];
+    int rx_bytes;
+    size_t total_received = 0;
+
+    // Leemos los datos enviados y los vamos escribiendo hasta que llegue todo el archivo
+    while(total_received < file_size) {
+        rx_bytes = recv(sock, ota_buff, sizeof(ota_buff), 0);
+        if(rx_bytes < 0) {
+            ESP_LOGE(TAG, "Error de red durante la descarga OTA");
+            break;
+        } 
+        else if(rx_bytes > 0) {
+            err = esp_ota_write(update_handle, (const void *)ota_buff, rx_bytes);
+            if(err != ESP_OK) {
+                ESP_LOGE(TAG, "Error escribiendo en Flash: %s", esp_err_to_name(err));
+                break;
+            }
+            total_received += rx_bytes;
+        }
+    }
+
+    // Se verifica el tamaño recibido y selecciona la partición a bootear
+    if(total_received == file_size) {
+        ESP_LOGI(TAG, "Descarga completa");
+        err = esp_ota_end(update_handle);
+        if(err == ESP_OK) {
+            err = esp_ota_set_boot_partition(update_partition);
+            if(err == ESP_OK) {
+                ESP_LOGI(TAG, "¡OTA Exitoso! Reiniciando en 2 segundos...");
+                // IMPORTANTE: Envía una confirmación al cliente de que todo salió bien
+                char success_msg[] = "OTA_OK";
+                send_all(sock, success_msg, strlen(success_msg));
+                
+                vTaskDelay(pdMS_TO_TICKS(2000));
+                esp_restart();
+            }
+        } 
+        else {
+            ESP_LOGE(TAG, "Error al finalizar OTA: %s", esp_err_to_name(err));
+        }
+    } 
+    else {
+        ESP_LOGE(TAG, "Descarga incompleta. Recibidos: %zu / Esperados: %zu", total_received, file_size);
+        esp_ota_abort(update_handle);
+    }
+}
