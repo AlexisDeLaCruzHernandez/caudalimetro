@@ -181,9 +181,9 @@ esp_err_t mdns_server_init(const char *hostname, const char *instance_name)
     // Configurar el nombre de la instancia 
     mdns_instance_name_set(instance_name);
 
-    // Anunciar el servicio TCP de tu datalogger para que la GUI lo descubra automáticamente
+    // Anunciar el servicio HTTP de tu datalogger para que la GUI lo descubra automáticamente
     // Formato: instance_name, service_type, proto, port, txt_data, num_items
-    mdns_service_add(instance_name, "_datalogger", "_tcp", 3333, NULL, 0);
+    mdns_service_add(instance_name, "_http", "_tcp", HTTP_PORT, NULL, 0);
 
     ESP_LOGI(TAG, "mDNS inicializado. Accesible en: %s.local", hostname);
     

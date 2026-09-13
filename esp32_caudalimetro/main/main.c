@@ -10,6 +10,7 @@
 #include "data_stg.h"
 #include "timestamp.h"
 #include "init.h"
+#include "http_server.h"
 
 static const char *TAG = "MAIN";
 
@@ -156,142 +157,7 @@ void task_datalogger(void *params)
     }
 }
 
-void task_tcp_server(void *params)
-{
-    struct sockaddr_in dest_addr;
-
-    dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(TCP_PORT);
-
-    int listen_sock = socket(AF_INET, SOCK_STREAM, IPPROTO_IP);
-    if(listen_sock < 0) {
-        ESP_LOGE(TAG, "Error creando el socket");
-        vTaskDelete(NULL);
-        return;
-    }
-
-    int opt = 1;
-    setsockopt(listen_sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-
-    if(bind(listen_sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr)) < 0) {
-        ESP_LOGE(TAG, "Error al hacer bind");
-        close(listen_sock);
-        vTaskDelete(NULL);
-        return;
-    }
-
-    if(listen(listen_sock, 1) < 0) {
-        ESP_LOGE(TAG, "Error al hacer listen");
-        close(listen_sock);
-        vTaskDelete(NULL);
-        return;
-    }
-
-    ESP_LOGI(TAG, "Servidor TCP escuchando en el puerto %d", TCP_PORT);
-
-    while (1) {
-        struct sockaddr_storage source_addr;
-        socklen_t addr_len = sizeof(source_addr);
-        
-        // El servidor se bloquea aquí esperando una conexión de la PC
-        int sock = accept(listen_sock, (struct sockaddr *)&source_addr, &addr_len);
-        if (sock < 0) {
-            ESP_LOGE(TAG, "Error al aceptar conexión");
-            continue;
-        }
-
-        // Añadimos timeout de 5 segundos para la recepción
-        struct timeval timeout;
-        timeout.tv_sec = 5;
-        timeout.tv_usec = 0;
-        setsockopt(sock, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
-
-        // Obtener la primera y última fecha guardadas en la memoria Flash
-        time_t first_time = 0;
-        time_t last_time = 0;
-        data_stg_get_time_range(&first_time, &last_time);
-
-        tcp_range_response_t range_info = {
-            .first_time = htonl((uint32_t)first_time),
-            .last_time  = htonl((uint32_t)last_time)
-        };
-
-        // Enviar la información del rango disponible al cliente al conectar
-        if(!send_all(sock, &range_info, sizeof(range_info))) {
-            ESP_LOGE(TAG, "Error al enviar el rango de fechas al cliente");
-            shutdown(sock, SHUT_RDWR);
-            close(sock);
-            continue;
-        }
-
-        // Recibir la estructura de solicitud (start_time y end_time)
-        tcp_request_t request;
-        if(!recv_all(sock, &request, sizeof(request))) {
-            ESP_LOGE(TAG, "No se pudo recibir tcp_request_t");
-            shutdown(sock, SHUT_RDWR);
-            close(sock);
-            continue;
-        }
-
-        time_t start_time = (time_t)ntohl(request.start_time);
-        time_t end_time = (time_t)ntohl(request.end_time);
-
-        // Si llegó en start_time 0x0 indica actualización OTA
-        if(start_time == OTA_MAGIC_WORD) {
-            // Detener tarea de datalogger que escribe en flash
-            vTaskSuspend(h_datalogger);
-
-            size_t firmware_size = (size_t)end_time;
-            ota_tcp_recv(sock, firmware_size);
-
-            // Si se recibió todo ok no llega hasta acá, por lo que es un error
-            char error_msg[] = "OTA_ERR";
-            send_all(sock, error_msg, strlen(error_msg));
-
-            vTaskResume(h_datalogger);
-            shutdown(sock, SHUT_RDWR);
-            close(sock);
-            continue;
-        }
-        
-        char first_time_str[32];
-        char last_time_str[32];
-
-        struct tm tm_start;
-        localtime_r(&start_time, &tm_start);
-        strftime(first_time_str, sizeof(first_time_str), "%Y-%m-%d %H:%M:%S", &tm_start);
-
-        struct tm tm_end;
-        localtime_r(&end_time, &tm_end);
-        strftime(last_time_str, sizeof(last_time_str), "%Y-%m-%d %H:%M:%S", &tm_end);
-
-        printf("Request -> Inicio: %s | Fin: %s\n\n", first_time_str, last_time_str);
-
-        data_t buffer[BUFFER_SIZE];
-        size_t items_read;
-        while(start_time != end_time) {
-            esp_err_t err = data_stg_read_range(&start_time, &end_time, buffer, BUFFER_SIZE, &items_read);
-            if(err != ESP_OK) {
-                ESP_LOGE(TAG, "Error leyendo datos");
-                break;
-            }
-            if(items_read > 0) {
-                for(size_t i = 0; i < items_read; i++) {
-                    buffer[i].time_info = htonl(buffer[i].time_info);
-                    buffer[i].volume = htons(buffer[i].volume);
-                }
-                if(!send_all(sock, buffer, items_read * sizeof(data_t))) {
-                    ESP_LOGE(TAG, "Error enviando datos");
-                    break;
-                }
-            }
-        }
-        // Cerramos el socket de esta sesión y volvemos a escuchar
-        shutdown(sock, SHUT_WR);
-        close(sock);
-    }
-}
+/* Servidor TCP reemplazado por esp_http_server REST API en http_server.c */
 
 void app_main(void)
 {
@@ -330,5 +196,7 @@ void app_main(void)
     
     xTaskCreate(task_caudal, "task_caudal", 1024 * 4, NULL, 1, NULL);
     xTaskCreate(task_datalogger, "task_datalogger", 1024 * 4, NULL, 1, &h_datalogger);
-    xTaskCreate(task_tcp_server, "task_tcp_server", 1024 * 8, NULL, 1, NULL);
+    
+    ESP_LOGI(TAG, "Iniciando Servidor HTTP REST API - v1.0");
+    start_webserver();
 }
