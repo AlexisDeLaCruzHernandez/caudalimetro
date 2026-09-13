@@ -58,4 +58,12 @@ export class TauriDeviceService implements IDeviceService {
       endTs,
     });
   }
+
+  async updateFirmwareOta(device: Device, fileBytes: Uint8Array): Promise<string> {
+    return await invoke<string>("ota_update_device", {
+      ip: device.ip,
+      port: device.port || 80,
+      firmwareBytes: Array.from(fileBytes),
+    });
+  }
 }

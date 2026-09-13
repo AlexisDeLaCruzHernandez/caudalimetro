@@ -22,7 +22,14 @@ interface DeviceState {
   isDarkMode: boolean;
   error: string | null;
 
+  activeView: "dashboard" | "ota";
+  isOtaAuthenticated: boolean;
+
   // Acciones
+  setActiveView: (view: "dashboard" | "ota") => void;
+  authenticateOta: (key: string) => boolean;
+  logoutOta: () => void;
+
   discoverDevices: () => Promise<void>;
   addManualDevice: (ip: string) => Promise<void>;
   removeManualDevice: (deviceId: string) => Promise<void>;
@@ -83,6 +90,24 @@ export const useDeviceStore = create<DeviceState>((set, get) => ({
   environment: getCurrentEnvironment(),
   isDarkMode: false,
   error: null,
+  activeView: "dashboard",
+  isOtaAuthenticated: false,
+
+  setActiveView: (view: "dashboard" | "ota") => {
+    set({ activeView: view });
+  },
+
+  authenticateOta: (key: string) => {
+    if (key === "lse-ota-key") {
+      set({ isOtaAuthenticated: true, activeView: "ota" });
+      return true;
+    }
+    return false;
+  },
+
+  logoutOta: () => {
+    set({ isOtaAuthenticated: false, activeView: "dashboard" });
+  },
 
   setSelectedPresetLabel: (label: string) => {
     set({ selectedPresetLabel: label });

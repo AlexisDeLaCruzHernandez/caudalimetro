@@ -90,4 +90,19 @@ export class SupabaseDeviceService implements IDeviceService {
       return [];
     }
   }
+
+  async updateFirmwareOta(device: Device, fileBytes: Uint8Array): Promise<string> {
+    const url = `http://${device.ip}:${device.port || 80}/api/v1/ota`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/octet-stream",
+      },
+      body: fileBytes,
+    });
+    if (!res.ok) {
+      throw new Error(`Error en reflasheo OTA (HTTP ${res.status}): ${await res.text()}`);
+    }
+    return await res.text();
+  }
 }

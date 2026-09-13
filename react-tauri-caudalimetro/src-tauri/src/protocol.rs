@@ -1,8 +1,5 @@
-use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use byteorder::{BigEndian, ReadBytesExt};
 use serde::{Deserialize, Serialize};
-use std::io;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio::net::TcpStream;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DateRange {
@@ -18,105 +15,80 @@ pub struct Sample {
     pub monthly_accumulated: u32,
 }
 
-
-/// Lee exactamente `num_bytes` del stream TCP asíncrono
-async fn recv_exact(stream: &mut TcpStream, num_bytes: usize) -> io::Result<Vec<u8>> {
-    let mut buffer = vec![0u8; num_bytes];
-    let mut read_bytes = 0;
-    while read_bytes < num_bytes {
-        let n = stream.read(&mut buffer[read_bytes..]).await?;
-        if n == 0 {
-            if read_bytes == 0 {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    "Conexión cerrada por el ESP32",
-                ));
-            } else {
-                break;
-            }
-        }
-        read_bytes += n;
-    }
-    buffer.truncate(read_bytes);
-    Ok(buffer)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct EspRangeResponse {
+    pub first_time: u32,
+    pub last_time: u32,
 }
 
-/// Obtener el rango de fechas disponibles en el ESP32
+/// Obtener el rango de fechas disponibles en el ESP32 a través de HTTP GET /api/v1/range
 pub async fn fetch_date_range(ip: &str, port: u16) -> Result<DateRange, String> {
-    let addr = format!("{}:{}", ip, port);
-    let mut stream = TcpStream::connect(&addr)
-        .await
-        .map_err(|e| format!("Error al conectar con {}: {}", addr, e))?;
+    let url = format!("http://{}:{}/api/v1/range", ip, port);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(5))
+        .build()
+        .map_err(|e| format!("Error creando cliente HTTP: {}", e))?;
 
-    let header_bytes = recv_exact(&mut stream, 8)
+    let res = client
+        .get(&url)
+        .send()
         .await
-        .map_err(|e| format!("Error al recibir cabecera de rango: {}", e))?;
+        .map_err(|e| format!("Error conectando con {}: {}", url, e))?;
 
-    if header_bytes.len() < 8 {
-        return Err("Cabecera incompleta recibida del ESP32".to_string());
+    if !res.status().is_success() {
+        return Err(format!("El ESP32 devolvió un código de error HTTP: {}", res.status()));
     }
 
-    let mut cursor = &header_bytes[..];
-    let first_ts = ReadBytesExt::read_u32::<BigEndian>(&mut cursor).map_err(|e| e.to_string())?;
-    let last_ts = ReadBytesExt::read_u32::<BigEndian>(&mut cursor).map_err(|e| e.to_string())?;
+    let parsed: EspRangeResponse = res
+        .json()
+        .await
+        .map_err(|e| format!("Error parseando JSON de rango: {}", e))?;
 
-    Ok(DateRange { first_ts, last_ts })
+    Ok(DateRange {
+        first_ts: parsed.first_time,
+        last_ts: parsed.last_time,
+    })
 }
 
-/// Descargar muestras del ESP32 para un rango especificado
+/// Descargar muestras del ESP32 a través de HTTP GET /api/v1/data?start=X&end=Y
 pub async fn download_samples(
     ip: &str,
     port: u16,
     start_ts: u32,
     end_ts: u32,
 ) -> Result<Vec<Sample>, String> {
-    let addr = format!("{}:{}", ip, port);
-    let mut stream = TcpStream::connect(&addr)
-        .await
-        .map_err(|e| format!("Error al conectar con {}: {}", addr, e))?;
+    let url = format!(
+        "http://{}:{}/api/v1/data?start={}&end={}",
+        ip, port, start_ts, end_ts
+    );
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("Error creando cliente HTTP: {}", e))?;
 
-    // El ESP32 siempre envía los 8 bytes de cabecera de rango al conectar; los descartamos
-    let header_bytes = recv_exact(&mut stream, 8)
+    let res = client
+        .get(&url)
+        .send()
         .await
-        .map_err(|e| format!("Error al leer cabecera inicial: {}", e))?;
-    if header_bytes.len() < 8 {
-        return Err("ESP32 cerró la conexión prematuramente".to_string());
+        .map_err(|e| format!("Error al solicitar muestras a {}: {}", url, e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("Error en respuesta HTTP: {}", res.status()));
     }
 
-    // Preparar el paquete de solicitud (8 bytes BigEndian: start_ts, end_ts)
-    let mut req_buf = Vec::with_capacity(8);
-    WriteBytesExt::write_u32::<BigEndian>(&mut req_buf, start_ts).map_err(|e| e.to_string())?;
-    WriteBytesExt::write_u32::<BigEndian>(&mut req_buf, end_ts).map_err(|e| e.to_string())?;
-
-    stream
-        .write_all(&req_buf)
+    let raw_bytes = res
+        .bytes()
         .await
-        .map_err(|e| format!("Error enviando solicitud al ESP32: {}", e))?;
+        .map_err(|e| format!("Error leyendo bytes del stream HTTP: {}", e))?;
 
-    // Recibir los datos de las muestras en trozos
-    let mut raw_data = Vec::new();
-    let mut chunk = [0u8; 1024];
-
-    loop {
-        match stream.read(&mut chunk).await {
-            Ok(0) => break, // EOF reached
-            Ok(n) => {
-                raw_data.extend_from_slice(&chunk[..n]);
-            }
-            Err(e) => {
-                return Err(format!("Error leyendo muestras TCP: {}", e));
-            }
-        }
-    }
-
-    // Desempaquetar trozos de 6 bytes (!IH)
+    // Desempaquetar trozos binarios de 6 bytes (!IH: u32 BE timestamp + u16 BE volume)
     const SAMPLE_SIZE: usize = 6;
-    let total_samples = raw_data.len() / SAMPLE_SIZE;
+    let total_samples = raw_bytes.len() / SAMPLE_SIZE;
     let mut samples = Vec::with_capacity(total_samples);
 
     for i in 0..total_samples {
         let offset = i * SAMPLE_SIZE;
-        let mut slice = &raw_data[offset..offset + SAMPLE_SIZE];
+        let mut slice = &raw_bytes[offset..offset + SAMPLE_SIZE];
         let timestamp = ReadBytesExt::read_u32::<BigEndian>(&mut slice).map_err(|e| e.to_string())?;
         let volume = ReadBytesExt::read_u16::<BigEndian>(&mut slice).map_err(|e| e.to_string())?;
 
@@ -127,6 +99,29 @@ pub async fn download_samples(
         });
     }
 
-
     Ok(samples)
+}
+
+/// Subir actualización de firmware al ESP32 a través de HTTP POST /api/v1/ota
+pub async fn upload_ota_firmware(ip: &str, port: u16, firmware_bytes: Vec<u8>) -> Result<String, String> {
+    let url = format!("http://{}:{}/api/v1/ota", ip, port);
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("Error creando cliente HTTP: {}", e))?;
+
+    let res = client
+        .post(&url)
+        .header("Content-Type", "application/octet-stream")
+        .body(firmware_bytes)
+        .send()
+        .await
+        .map_err(|e| format!("Error al transmitir firmware OTA a {}: {}", url, e))?;
+
+    if !res.status().is_success() {
+        return Err(format!("Error de reflasheo OTA (HTTP {}): {}", res.status(), res.text().await.unwrap_or_default()));
+    }
+
+    let body = res.text().await.unwrap_or_default();
+    Ok(body)
 }
