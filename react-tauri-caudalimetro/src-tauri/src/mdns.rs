@@ -4,7 +4,7 @@ use std::time::Duration;
 
 pub async fn discover_mdns_devices(timeout_secs: u64) -> Vec<DeviceRecord> {
     let mut discovered = Vec::new();
-    let service_types = ["_datalogger._tcp.local.", "_caudalimetro._tcp.local."];
+    let service_types = ["_http._tcp.local.", "_datalogger._tcp.local.", "_caudalimetro._tcp.local."];
 
     if let Ok(daemon) = ServiceDaemon::new() {
         for service_type in service_types {

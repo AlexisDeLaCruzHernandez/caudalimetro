@@ -5,7 +5,14 @@ import { getChartPalette, getCssVar } from "../utils/theme";
 import { formatDate } from "../utils/date";
 import { ExportDropdown } from "./ExportDropdown";
 import { Toast, ToastMessage } from "./Toast";
-import { Activity, RefreshCw, BarChart2, TrendingUp, Wrench } from "lucide-react";
+import {
+  Activity,
+  RefreshCw,
+  BarChart2,
+  Wrench,
+  Droplet,
+  Layers,
+} from "lucide-react";
 
 export const FlowChart: React.FC = () => {
   const {
@@ -21,6 +28,7 @@ export const FlowChart: React.FC = () => {
 
   const [toast, setToast] = useState<ToastMessage | null>(null);
   const [isRecalculating, setIsRecalculating] = useState(false);
+  const [chartMode, setChartMode] = useState<"temporal" | "monthly_grouped">("temporal");
 
   const selectedDevices = useMemo(() => {
     return devices.filter((d) => selectedDeviceIds.includes(d.id));
@@ -49,7 +57,35 @@ export const FlowChart: React.FC = () => {
     }
   };
 
-  const chartOption = useMemo(() => {
+  // 1. Cálculo del volumen consumido por sensor en el intervalo seleccionado (Summary Cards)
+  const { intervalSummaryCards, totalIntervalVolume } = useMemo(() => {
+    const palette = getChartPalette();
+    let totalVolume = 0;
+
+    const cards = selectedDevices.map((dev, idx) => {
+      const samples = samplesByDevice[dev.id] || [];
+      const devVolume = samples.reduce((acc, s) => {
+        if (s.timestamp >= dateRange.startTs && s.timestamp <= dateRange.endTs) {
+          return acc + s.volume;
+        }
+        return acc;
+      }, 0);
+
+      totalVolume += devVolume;
+
+      return {
+        id: dev.id,
+        name: dev.name,
+        volume: devVolume,
+        color: palette[idx % palette.length],
+      };
+    });
+
+    return { intervalSummaryCards: cards, totalIntervalVolume: totalVolume };
+  }, [selectedDevices, samplesByDevice, dateRange]);
+
+  // 2. Configuración de Gráficos Duales (Modo Vista Temporal)
+  const chartOptionTemporal = useMemo(() => {
     const palette = getChartPalette();
     const textColor = getCssVar("--text-main", "#0f172a");
     const mutedColor = getCssVar("--text-muted", "#64748b");
@@ -59,7 +95,6 @@ export const FlowChart: React.FC = () => {
     const minTime = dateRange.startTs * 1000;
     const maxTime = dateRange.endTs * 1000;
 
-    // 1. Series de Barras para Caudal por Intervalo (Grid 0 - Superior)
     const intervalBarSeries = selectedDevices.map((dev, idx) => {
       const samples = samplesByDevice[dev.id] || [];
       const color = palette[idx % palette.length];
@@ -78,7 +113,6 @@ export const FlowChart: React.FC = () => {
       };
     });
 
-    // 2. Series de Líneas con Gradiente para Acumulado Mensual (Grid 1 - Inferior)
     const accumulatedLineSeries = selectedDevices.map((dev, idx) => {
       const samples = samplesByDevice[dev.id] || [];
       const color = palette[idx % palette.length];
@@ -240,13 +274,190 @@ export const FlowChart: React.FC = () => {
     };
   }, [selectedDevices, samplesByDevice, dateRange, isDarkMode]);
 
+  // 3. Determinación de agrupamiento (Semanal si el rango < 3 meses / 90 días, Mensual en caso contrario)
+  const isWeekly = useMemo(() => {
+    const rangeDays = (dateRange.endTs - dateRange.startTs) / (24 * 3600);
+    return rangeDays < 90;
+  }, [dateRange]);
+
+  // 4. Configuración de Gráfico de Barras Agrupadas (Modo Acumulado Histórico Semanal / Mensual)
+  const chartOptionGrouped = useMemo(() => {
+    const palette = getChartPalette();
+    const textColor = getCssVar("--text-main", "#0f172a");
+    const mutedColor = getCssVar("--text-muted", "#64748b");
+    const gridColor = getCssVar("--chart-grid", "#e2e8f0");
+    const cardBg = getCssVar("--bg-card", "#ffffff");
+
+    // Generar la secuencia continua de todos los períodos (semanas o meses) en el rango [startTs, endTs]
+    const sortedGroupKeys: string[] = [];
+    const startDate = new Date(dateRange.startTs * 1000);
+    const endDate = new Date(dateRange.endTs * 1000);
+
+    if (isWeekly) {
+      const curr = new Date(startDate);
+      const day = curr.getDay();
+      const diff = curr.getDate() - day + (day === 0 ? -6 : 1);
+      curr.setDate(diff);
+
+      while (curr <= endDate || curr.getTime() <= endDate.getTime() + 6 * 24 * 3600 * 1000) {
+        const weekEnd = new Date(curr);
+        weekEnd.setDate(weekEnd.getDate() + 6);
+        if (weekEnd >= startDate && curr <= endDate) {
+          const year = curr.getFullYear();
+          const month = String(curr.getMonth() + 1).padStart(2, "0");
+          const dateNum = String(curr.getDate()).padStart(2, "0");
+          const key = `${year}-${month}-${dateNum}`;
+          if (!sortedGroupKeys.includes(key)) {
+            sortedGroupKeys.push(key);
+          }
+        }
+        curr.setDate(curr.getDate() + 7);
+      }
+    } else {
+      const curr = new Date(startDate.getFullYear(), startDate.getMonth(), 1);
+      const endMonth = new Date(endDate.getFullYear(), endDate.getMonth(), 1);
+
+      while (curr <= endMonth) {
+        const year = curr.getFullYear();
+        const month = String(curr.getMonth() + 1).padStart(2, "0");
+        const key = `${year}-${month}`;
+        if (!sortedGroupKeys.includes(key)) {
+          sortedGroupKeys.push(key);
+        }
+        curr.setMonth(curr.getMonth() + 1);
+      }
+    }
+
+    sortedGroupKeys.sort();
+
+    // Mapear muestras existentes a cada período
+    const groupMap: Record<string, Record<string, number>> = {};
+
+    selectedDevices.forEach((dev) => {
+      const samples = samplesByDevice[dev.id] || [];
+      samples.forEach((s) => {
+        if (s.timestamp < dateRange.startTs || s.timestamp > dateRange.endTs) return;
+
+        let groupKey = "";
+        if (isWeekly) {
+          const d = new Date(s.timestamp * 1000);
+          const day = d.getDay();
+          const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+          const monday = new Date(d);
+          monday.setDate(diff);
+          const year = monday.getFullYear();
+          const month = String(monday.getMonth() + 1).padStart(2, "0");
+          const dateNum = String(monday.getDate()).padStart(2, "0");
+          groupKey = `${year}-${month}-${dateNum}`;
+        } else {
+          const d = new Date(s.timestamp * 1000);
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, "0");
+          groupKey = `${year}-${month}`;
+        }
+
+        if (!groupMap[groupKey]) {
+          groupMap[groupKey] = {};
+        }
+        groupMap[groupKey][dev.id] = (groupMap[groupKey][dev.id] || 0) + s.volume;
+      });
+    });
+
+    const formattedXAxisLabels = sortedGroupKeys.map((key) => {
+      if (isWeekly) {
+        const parts = key.split("-");
+        return `Sem. ${parts[2]}/${parts[1]}`;
+      }
+      return key;
+    });
+
+    const series = selectedDevices.map((dev, idx) => {
+      const color = palette[idx % palette.length];
+      const data = sortedGroupKeys.map((k) => groupMap[k]?.[dev.id] || 0);
+
+      return {
+        name: dev.name,
+        type: "bar",
+        barMaxWidth: 24,
+        barGap: "15%",
+        itemStyle: {
+          color,
+          borderRadius: [4, 4, 0, 0],
+        },
+        data,
+      };
+    });
+
+    const yAxisName = isWeekly ? "Acumulado Semanal (Litros)" : "Acumulado Mensual (Litros)";
+
+    return {
+      backgroundColor: cardBg,
+      tooltip: {
+        trigger: "axis",
+        backgroundColor: cardBg,
+        borderColor: gridColor,
+        textStyle: { color: textColor },
+        axisPointer: { type: "shadow" },
+        formatter: (params: any[]) => {
+          if (!params || params.length === 0) return "";
+          const labelIndex = params[0].dataIndex;
+          const key = sortedGroupKeys[labelIndex];
+          const displayLabel = isWeekly
+            ? `Semana del ${key.split("-")[2]}/${key.split("-")[1]}/${key.split("-")[0]}`
+            : `Mes: ${key}`;
+
+          let result = `<div style="font-size:12px; font-weight:600; color:${mutedColor}; margin-bottom:6px;">
+            ${displayLabel}
+          </div>`;
+          params.forEach((item) => {
+            result += `<div style="display:flex; align-items:center; justify-content:space-between; gap:16px; margin-top:3px;">
+              <div style="display:flex; align-items:center; gap:6px;">
+                <span style="display:inline-block; width:8px; height:8px; border-radius:50%; background-color:${item.color};"></span>
+                <span style="color:${textColor}; font-weight:500;">${item.seriesName}</span>
+              </div>
+              <strong style="color:${textColor};">${item.value.toLocaleString()} L</strong>
+            </div>`;
+          });
+          return result;
+        },
+      },
+      legend: {
+        top: "0px",
+        textStyle: { color: textColor, fontWeight: 500 },
+      },
+      grid: {
+        left: "4%",
+        right: "4%",
+        top: "40px",
+        bottom: "10%",
+        containLabel: true,
+      },
+      xAxis: {
+        type: "category",
+        data: formattedXAxisLabels,
+        axisLine: { lineStyle: { color: gridColor } },
+        axisLabel: { color: mutedColor, fontWeight: 600 },
+      },
+      yAxis: {
+        type: "value",
+        name: yAxisName,
+        nameTextStyle: { color: mutedColor, fontWeight: 600, fontSize: 11 },
+        axisLine: { show: false },
+        axisLabel: { color: mutedColor },
+        splitLine: { lineStyle: { color: gridColor, type: "dashed" } },
+      },
+      series,
+    };
+  }, [selectedDevices, samplesByDevice, dateRange, isWeekly, isDarkMode]);
+
   const hasSamples = selectedDevices.some(
     (dev) => (samplesByDevice[dev.id] || []).length > 0
   );
 
   return (
     <div className="flex-1 flex flex-col bg-[var(--bg-card)] border border-[var(--border-color)] rounded-xl shadow-xs p-4 overflow-hidden relative">
-      <div className="flex items-center justify-between pb-3 mb-2 border-b border-[var(--border-color)]">
+      {/* Cabecera Superior */}
+      <div className="flex flex-wrap items-center justify-between pb-3 mb-3 border-b border-[var(--border-color)] gap-2">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-1.5">
             <Activity className="w-5 h-5 text-[var(--color-primary)]" />
@@ -254,16 +465,32 @@ export const FlowChart: React.FC = () => {
               Mediciones de Caudal
             </h2>
           </div>
-          <div className="flex items-center gap-2 text-xs text-[var(--text-muted)] border-l border-[var(--border-color)] pl-3">
-            <span className="flex items-center gap-1">
-              <BarChart2 className="w-3.5 h-3.5 text-blue-500" />
-              Intervalo (Barras)
-            </span>
-            <span>•</span>
-            <span className="flex items-center gap-1">
-              <TrendingUp className="w-3.5 h-3.5 text-emerald-500" />
-              Acumulado Mensual (Gradiente)
-            </span>
+
+          {/* Selector de Modo de Gráficos (Vista Temporal vs Histórico Semanal/Mensual) */}
+          <div className="flex items-center bg-[var(--bg-main)] border border-[var(--border-color)] rounded-lg p-0.5 ml-2">
+            <button
+              onClick={() => setChartMode("temporal")}
+              className={`flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                chartMode === "temporal"
+                  ? "bg-[var(--color-primary)] text-white shadow-2xs"
+                  : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
+              }`}
+            >
+              <BarChart2 className="w-3.5 h-3.5" />
+              <span>Vista Temporal</span>
+            </button>
+
+            <button
+              onClick={() => setChartMode("monthly_grouped")}
+              className={`flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md transition-all cursor-pointer ${
+                chartMode === "monthly_grouped"
+                  ? "bg-[var(--color-primary)] text-white shadow-2xs"
+                  : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>{isWeekly ? "Histórico Semanal" : "Histórico Mensual"}</span>
+            </button>
           </div>
         </div>
 
@@ -292,6 +519,42 @@ export const FlowChart: React.FC = () => {
         </div>
       </div>
 
+      {/* Fila de Summary Cards (Resumen de Volumen en el Intervalo) */}
+      {selectedDeviceIds.length > 0 && hasSamples && (
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2.5 mb-3 shrink-0">
+          {/* Card Total Acumulado */}
+          <div className="bg-[var(--bg-main)]/80 border-2 border-[var(--color-primary)]/40 rounded-xl p-2.5 flex flex-col justify-between shadow-2xs">
+            <div className="flex items-center gap-1.5 text-[11px] font-bold text-[var(--color-primary)] truncate">
+              <Droplet className="w-3.5 h-3.5 fill-current shrink-0" />
+              <span className="truncate">Total Acumulado</span>
+            </div>
+            <div className="text-base font-extrabold text-[var(--text-main)] mt-1 font-mono">
+              {totalIntervalVolume.toLocaleString()} <span className="text-xs font-normal text-[var(--text-muted)] font-sans">L</span>
+            </div>
+          </div>
+
+          {/* Cards por Sensor */}
+          {intervalSummaryCards.map((card) => (
+            <div
+              key={card.id}
+              className="bg-[var(--bg-card)] border border-[var(--border-color)] rounded-xl p-2.5 flex flex-col justify-between shadow-2xs"
+            >
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold text-[var(--text-muted)] truncate">
+                <span
+                  className="w-2.5 h-2.5 rounded-full shrink-0"
+                  style={{ backgroundColor: card.color }}
+                />
+                <span className="truncate">{card.name}</span>
+              </div>
+              <div className="text-base font-extrabold text-[var(--text-main)] mt-1 font-mono">
+                {card.volume.toLocaleString()} <span className="text-xs font-normal text-[var(--text-muted)] font-sans">L</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Área del Gráfico o Estados Vacíos */}
       {selectedDeviceIds.length === 0 ? (
         <div className="flex-1 flex flex-col items-center justify-center text-center text-[var(--text-muted)] p-6">
           <Activity className="w-12 h-12 stroke-1 mb-2 opacity-50 text-[var(--color-primary)]" />
@@ -309,9 +572,9 @@ export const FlowChart: React.FC = () => {
           </p>
         </div>
       ) : (
-        <div className="flex-1 w-full h-full min-h-[400px]">
+        <div className="flex-1 w-full h-full min-h-[380px]">
           <ReactECharts
-            option={chartOption}
+            option={chartMode === "temporal" ? chartOptionTemporal : chartOptionGrouped}
             style={{ width: "100%", height: "100%" }}
             notMerge={true}
             lazyUpdate={true}

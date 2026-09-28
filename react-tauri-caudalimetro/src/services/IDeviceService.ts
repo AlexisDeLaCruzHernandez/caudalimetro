@@ -35,4 +35,7 @@ export interface IDeviceService {
     startTs: number,
     endTs: number
   ): Promise<Sample[]>;
+
+  /** Actualiza el firmware del dispositivo vía HTTP POST OTA */
+  updateFirmwareOta(device: Device, fileBytes: Uint8Array): Promise<string>;
 }

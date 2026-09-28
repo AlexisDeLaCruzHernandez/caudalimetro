@@ -209,6 +209,18 @@ async fn recalculate_monthly_accumulated(
         .map_err(|e| format!("Error recalculando acumulados en SQLite: {}", e))
 }
 
+#[tauri::command]
+async fn ota_update_device(ip: String, port: u16, firmware_bytes: Vec<u8>) -> Result<String, String> {
+    protocol::upload_ota_firmware(&ip, port, firmware_bytes).await
+}
+
+#[tauri::command]
+async fn read_binary_file(path: String) -> Result<Vec<u8>, String> {
+    tokio::fs::read(&path)
+        .await
+        .map_err(|e| format!("Error leyendo archivo binario: {}", e))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let db_path = "caudalimetro_cache.db";
@@ -227,7 +239,9 @@ pub fn run() {
             sync_device_samples,
             get_cached_samples,
             save_excel_file,
-            recalculate_monthly_accumulated
+            recalculate_monthly_accumulated,
+            ota_update_device,
+            read_binary_file
         ])
 
         .run(tauri::generate_context!())

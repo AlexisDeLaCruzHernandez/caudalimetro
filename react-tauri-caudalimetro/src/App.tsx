@@ -4,6 +4,7 @@ import { Header } from "./components/Header";
 import { DeviceList } from "./components/DeviceList";
 import { DateRangePicker } from "./components/DateRangePicker";
 import { FlowChart } from "./components/FlowChart";
+import { OtaView } from "./components/OtaView";
 import { useDeviceStore } from "./store/useDeviceStore";
 import { AlertCircle } from "lucide-react";
 
@@ -11,7 +12,7 @@ const SYNC_INTERVAL_MS =
   (Number(import.meta.env.VITE_SYNC_INTERVAL_SEC) || 60) * 1000;
 
 export function App() {
-  const { discoverDevices, syncAndFetchSamples, error } = useDeviceStore();
+  const { discoverDevices, syncAndFetchSamples, error, activeView } = useDeviceStore();
 
   useEffect(() => {
     discoverDevices();
@@ -38,14 +39,18 @@ export function App() {
         </div>
       )}
 
-      <div className="flex-1 flex overflow-hidden">
-        <DeviceList />
+      {activeView === "ota" ? (
+        <OtaView />
+      ) : (
+        <div className="flex-1 flex overflow-hidden">
+          <DeviceList />
 
-        <main className="flex-1 flex flex-col p-4 gap-4 overflow-y-auto">
-          <DateRangePicker />
-          <FlowChart />
-        </main>
-      </div>
+          <main className="flex-1 flex flex-col p-4 gap-4 overflow-y-auto">
+            <DateRangePicker />
+            <FlowChart />
+          </main>
+        </div>
+      )}
     </div>
   );
 }

@@ -144,4 +144,9 @@ export class MockDeviceService implements IDeviceService {
     const samples = this.samplesStore.get(deviceId) || [];
     return samples.filter((s) => s.timestamp >= startTs && s.timestamp <= endTs);
   }
+
+  async updateFirmwareOta(_device: Device, _fileBytes: Uint8Array): Promise<string> {
+    await new Promise((res) => setTimeout(res, 1500));
+    return JSON.stringify({ status: "OTA_OK" });
+  }
 }
