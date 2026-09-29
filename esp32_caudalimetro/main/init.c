@@ -1,4 +1,5 @@
 #include "init.h"
+#include "esp_eth_phy_lan87xx.h"
 #include "esp_log.h"
 
 static const char *TAG = "INIT";
@@ -55,31 +56,48 @@ esp_err_t gpio_caudal_init(gpio_isr_t isr_handler)
     return ESP_OK;
 }
 
-void wifi_init_sta(EventGroupHandle_t *wifi_event, esp_event_handler_t handler)
+void eth_init(esp_event_handler_t handler)
 {
-    *wifi_event = xEventGroupCreate(); // Crea el event group 
-    ESP_ERROR_CHECK(esp_netif_init()); // Inicializa la pila de red TCP/IP
-    ESP_ERROR_CHECK(esp_event_loop_create_default()); // Crea loop de eventos para distribuirlos 
-    esp_netif_create_default_wifi_sta(); // Crea la interfaz de red para el modo STA
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    
+    esp_netif_config_t cfg = ESP_NETIF_DEFAULT_ETH();
+    esp_netif_t *eth_netif = esp_netif_new(&cfg);
 
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT(); // Obtiene la configuración por defecto para inicializar el Wi-Fi
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg)); // Inicializa el Wi-Fi
+    // Configuración MAC específica para ESP32
+    eth_mac_config_t mac_config = ETH_MAC_DEFAULT_CONFIG();
+    eth_esp32_emac_config_t esp32_emac_config = ETH_ESP32_EMAC_DEFAULT_CONFIG();
+    
+    // Pines SMI
+    esp32_emac_config.smi_gpio.mdc_num = 23;
+    esp32_emac_config.smi_gpio.mdio_num = 18;
+    
+    // NOTA: ETH_ESP32_EMAC_DEFAULT_CONFIG() ya establece por defecto 
+    // el reloj RMII (EMAC_CLK_EXT_IN) de manera que se inyecta por el GPIO 0.
+    // No hace falta sobreescribirlo aquí.
+    
+    // Configuración PHY para LAN8720
+    eth_phy_config_t phy_config = ETH_PHY_DEFAULT_CONFIG();
+    phy_config.phy_addr = ESP_ETH_PHY_ADDR_AUTO;
+    
+    // ¡CRÍTICO! Al no tener el pin RST conectado al ESP32, se debe omitir con -1
+    phy_config.reset_gpio_num = -1;
 
-    // Registra el Handler para eventos relacionados a la conexión Wi-Fi
-    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, handler, NULL));
-    // Registra el Handler para eventos relacionados con la dirección IP
-    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, handler, NULL));
+    esp_eth_mac_t *mac = esp_eth_mac_new_esp32(&esp32_emac_config, &mac_config);
+    esp_eth_phy_t *phy = esp_eth_phy_new_lan87xx(&phy_config);
+    
+    esp_eth_config_t eth_config = ETH_DEFAULT_CONFIG(mac, phy);
+    esp_eth_handle_t eth_handle = NULL;
+    ESP_ERROR_CHECK(esp_eth_driver_install(&eth_config, &eth_handle));
 
-    wifi_config_t wifi_config = { // Configuración de la red Wi-Fi
-        .sta = {
-            .ssid = WIFI_SSID,
-            .password = WIFI_PASS,
-        },
-    };
+    // Adjuntar la interfaz Ethernet al stack TCP/IP
+    ESP_ERROR_CHECK(esp_netif_attach(eth_netif, esp_eth_new_netif_glue(eth_handle)));
 
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA)); // Indica el modo STA
-    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config)); // Carga la configuración de la red
-    ESP_ERROR_CHECK(esp_wifi_start()); // Inicia el controlador de Wi-Fi, provoca WIFI_EVENT_STA_START
+    // Registrar Handlers para eventos de Ethernet e IP
+    ESP_ERROR_CHECK(esp_event_handler_register(ETH_EVENT, ESP_EVENT_ANY_ID, handler, NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT, IP_EVENT_ETH_GOT_IP, handler, NULL));
+
+    ESP_ERROR_CHECK(esp_eth_start(eth_handle));
 }
 
 bool recv_all(int sock, void *buffer, size_t length) 

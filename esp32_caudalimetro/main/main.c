@@ -18,33 +18,40 @@ TaskHandle_t h_datalogger;
 SemaphoreHandle_t caudal_switch;
 QueueHandle_t liter_count;
 QueueHandle_t led_error;
-EventGroupHandle_t wifi_event_group;
-const int WIFI_CONNECTED_BIT = BIT0;
+EventGroupHandle_t eth_event_group;
+const int ETH_CONNECTED_BIT = BIT0;
 
-static void wifi_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) 
+static void eth_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) 
 {
-    led_state_t led_wifi = {.led_pin = WIFI_ERROR_PIN, .error = true};
-    // Se ejecuta al inicializar el modo STA y quiere conectarse 
-    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
-        esp_wifi_connect();
-    } 
+    led_state_t led_eth = {.led_pin = WIFI_ERROR_PIN, .error = true};
     
-    // Se ejecuta si se perdió la conexión, se intenta conectar nuevamente e indica la desconexión
-    else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGI(TAG, "Desconectado del Wi-Fi. Reconectando...");
-        xEventGroupClearBits(wifi_event_group, WIFI_CONNECTED_BIT);
-        led_wifi.error = true;
-        xQueueSendToBack(led_error, &led_wifi, portMAX_DELAY);
-        esp_wifi_connect();
+    if (event_base == ETH_EVENT) {
+        switch (event_id) {
+            case ETHERNET_EVENT_CONNECTED:
+                ESP_LOGI(TAG, "Cable de red conectado (Link UP)");
+                break;
+            case ETHERNET_EVENT_DISCONNECTED:
+                ESP_LOGI(TAG, "Cable de red desconectado (Link DOWN)");
+                xEventGroupClearBits(eth_event_group, ETH_CONNECTED_BIT);
+                led_eth.error = true;
+                xQueueSendToBack(led_error, &led_eth, portMAX_DELAY);
+                break;
+            case ETHERNET_EVENT_START:
+                ESP_LOGI(TAG, "Driver Ethernet iniciado");
+                break;
+            case ETHERNET_EVENT_STOP:
+                ESP_LOGI(TAG, "Driver Ethernet detenido");
+                break;
+            default:
+                break;
+        }
     } 
-    
-    // Se ejecutá cuando se obtuvo una dirección IP, muestra la ip e indica la conexión
-    else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+    else if (event_base == IP_EVENT && event_id == IP_EVENT_ETH_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
-        ESP_LOGI(TAG, "IP obtenida: " IPSTR, IP2STR(&event->ip_info.ip));
-        xEventGroupSetBits(wifi_event_group, WIFI_CONNECTED_BIT);
-        led_wifi.error = false;
-        xQueueSendToBack(led_error, &led_wifi, portMAX_DELAY);
+        ESP_LOGI(TAG, "IP obtenida vía Ethernet: " IPSTR, IP2STR(&event->ip_info.ip));
+        xEventGroupSetBits(eth_event_group, ETH_CONNECTED_BIT);
+        led_eth.error = false;
+        xQueueSendToBack(led_error, &led_eth, portMAX_DELAY);
     }
 }
 
@@ -179,9 +186,9 @@ void app_main(void)
     led.error = false;
     xQueueSendToBack(led_error, &led, portMAX_DELAY);
     
-
-    ESP_LOGI(TAG, "Inicializando Wi-Fi");
-    wifi_init_sta(&wifi_event_group, wifi_event_handler);
+    ESP_LOGI(TAG, "Inicializando Ethernet");
+    eth_event_group = xEventGroupCreate();
+    eth_init(eth_event_handler);
 
     ESP_LOGI(TAG, "Inicializando mDNS");
     ESP_ERROR_CHECK(mdns_server_init(MDNS_HOSTNAME, MDNS_INSTANCE_NAME));

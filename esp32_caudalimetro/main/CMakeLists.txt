@@ -5,7 +5,8 @@ idf_component_register(
         data_stg
         timestamp
         nvs_flash 
-        esp_wifi
+        esp_eth
+        esp_netif
         app_update
         mdns
         esp_http_server

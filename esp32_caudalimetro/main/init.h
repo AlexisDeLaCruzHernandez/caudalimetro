@@ -5,7 +5,10 @@
 #include <dirent.h>
 
 #include "driver/gpio.h"
-#include "esp_wifi.h"
+#include "esp_eth.h"   
+#include "esp_netif.h"
+#include "esp_mac.h"
+#include "esp_event.h"
 #include "lwip/sockets.h"
 #include "lwip/netdb.h"
 #include "mdns.h"
@@ -15,7 +18,7 @@
 #define INTERVAL_MIN        0.25
 #define INTERVAL_SEC        (INTERVAL_MIN * 60) 
 
-#define CAUDAL_PIN          GPIO_NUM_0
+#define CAUDAL_PIN          GPIO_NUM_14
 #define DEBOUNCE_TIME_MS    20
 
 #define HTTP_PORT           80
@@ -28,10 +31,10 @@
 #define MDNS_INSTANCE_NAME  "ESP32 Caudalimetro"
 
 #define SLEEP_TIME_MS       500
-#define SNTP_ERROR_PIN      GPIO_NUM_1
+#define SNTP_ERROR_PIN      GPIO_NUM_2
 #define MAX_SNTP_SYNC_SEC   (3 * 60 * 60)
-#define WIFI_ERROR_PIN      GPIO_NUM_2
-#define FLASH_ERROR_PIN     GPIO_NUM_3
+#define WIFI_ERROR_PIN      GPIO_NUM_4
+#define FLASH_ERROR_PIN     GPIO_NUM_15
 
 typedef struct {
     gpio_num_t led_pin;
@@ -62,7 +65,7 @@ void borrar_todos_los_archivos(const char *path);
  */
 esp_err_t gpio_caudal_init(gpio_isr_t isr_handler);
 
-void wifi_init_sta(EventGroupHandle_t *wifi_event, esp_event_handler_t handler);
+void eth_init(esp_event_handler_t handler);
 
 bool recv_all(int sock, void *buffer, size_t length);
 
